@@ -1,0 +1,2376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IONOS Traffic Billing Tool</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    .container { max-width: 960px; margin: 0 auto; }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1.75rem; gap: 1rem;
+    }
+    .header-logo img { display: block; height: 48px; width: auto; }
+    .header-title { text-align: center; flex: 1; }
+    .header-title h1 { font-size: 1.75rem; font-weight: 700; color: #38bdf8; letter-spacing: 0.03em; }
+    .header-title p  { color: #94a3b8; margin-top: 0.4rem; font-size: 0.95rem; }
+    .header-spacer { width: 64px; }
+
+    .card {
+      background: #1e2130;
+      border: 1px solid #2d3348;
+      border-radius: 12px;
+      padding: 1.75rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .card h2 {
+      font-size: 1rem; font-weight: 600; color: #7dd3fc;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      margin-bottom: 1.25rem;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+
+    /* ── Mode selector ── */
+    .mode-group {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+    }
+
+    .mode-radio { display: none; }
+
+    .mode-option {
+      cursor: pointer;
+      border: 2px solid #2d3348;
+      border-radius: 10px;
+      padding: 0.9rem 1rem;
+      display: flex; flex-direction: column; gap: 0.2rem;
+      transition: border-color 0.2s, background 0.2s;
+      background: #0f1117;
+      user-select: none;
+    }
+    .mode-option:hover { border-color: #38bdf8; }
+
+    .mode-radio:checked + .mode-option {
+      border-color: #38bdf8;
+      background: #0c1a2a;
+    }
+
+    .mode-icon  { font-size: 1.4rem; }
+    .mode-title { font-size: 0.95rem; font-weight: 600; color: #e2e8f0; }
+    .mode-desc  { font-size: 0.78rem; color: #64748b; }
+
+    /* ── Form ── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 0.4rem; }
+    .form-group.full-width { grid-column: 1 / -1; }
+
+    label { font-size: 0.85rem; color: #94a3b8; font-weight: 500; }
+
+    input, select {
+      background: #0f1117;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      padding: 0.65rem 0.9rem;
+      color: #e2e8f0;
+      font-size: 0.95rem;
+      transition: border-color 0.2s;
+      outline: none;
+      width: 100%;
+    }
+    input:focus, select:focus { border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56,189,248,0.12); }
+    input::placeholder { color: #4b5563; }
+
+    select {
+      appearance: none; -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.9rem center;
+      padding-right: 2.5rem;
+      cursor: pointer;
+    }
+    select option { background: #1e2130; color: #e2e8f0; }
+
+    .period-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+    .field-note { font-size: 0.75rem; color: #4b5563; margin-top: 0.15rem; }
+    .rate-note  { font-size: 0.75rem; color: #4b5563; margin-top: 0.3rem; }
+
+    button[type="submit"] {
+      width: 100%; margin-top: 1.25rem; padding: 0.75rem;
+      background: #0369a1; color: #fff; border: none; border-radius: 8px;
+      font-size: 1rem; font-weight: 600; cursor: pointer;
+      transition: background 0.2s, transform 0.1s; letter-spacing: 0.02em;
+    }
+    button[type="submit"]:hover   { background: #0284c7; }
+    button[type="submit"]:active  { transform: scale(0.98); }
+    button[type="submit"]:disabled{ background: #334155; cursor: not-allowed; }
+
+    .spinner {
+      display: none; width: 18px; height: 18px;
+      border: 2.5px solid #fff4; border-top-color: #fff;
+      border-radius: 50%; animation: spin 0.7s linear infinite; margin: 0 auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* browse buttons */
+    .browse-btn {
+      margin-top: 0.6rem; padding: 0.45rem 1rem;
+      background: transparent; border: 1px solid #374151; border-radius: 7px;
+      color: #94a3b8; font-size: 0.85rem; cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .browse-btn:hover    { border-color: #38bdf8; color: #38bdf8; }
+    .browse-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .browse-spinner {
+      display: none; width: 12px; height: 12px;
+      border: 2px solid #4b5563; border-top-color: #94a3b8;
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+
+    /* ── Error box ── */
+    #error-box {
+      display: none;
+      background: #450a0a; border: 1px solid #991b1b; border-radius: 8px;
+      padding: 0.85rem 1rem; color: #fca5a5; font-size: 0.9rem; margin-bottom: 1.5rem;
+    }
+
+    /* ── Summary stat cards ── */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 1rem; margin-top: 0.5rem;
+    }
+    .stat-card {
+      background: #0f1117; border: 1px solid #2d3348; border-radius: 10px; padding: 1rem 1.25rem;
+    }
+    .stat-label { font-size: 0.78rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.35rem; }
+    .stat-value { font-size: 1.2rem; font-weight: 700; color: #e2e8f0; word-break: break-all; }
+    .stat-value.hi-in   { color: #34d399; }
+    .stat-value.hi-out  { color: #f87171; }
+    .stat-value.hi-ip   { color: #fbbf24; }
+    .stat-value.hi-cost { color: #c084fc; }
+    .uuid-val { font-size: 0.82rem !important; font-family: 'Courier New', monospace; color: #94a3b8 !important; font-weight: 400 !important; }
+
+    /* ── Badges ── */
+    .badge {
+      display: inline-block; padding: 0.2rem 0.65rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600;
+    }
+    .badge-sm {
+      display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.72rem; font-weight: 600; white-space: nowrap;
+    }
+    .badge-nlb { background: #1e3a5f; color: #7dd3fc; }
+    .badge-alb { background: #1a2e40; color: #93c5fd; }
+    .badge-nat { background: #3b2f1e; color: #fcd34d; }
+    .badge-k8s { background: #1e2d40; color: #67e8f9; }
+    .badge-vdc { background: #1a2e1e; color: #6ee7b7; }
+    .badge-srv { background: #1a2e1e; color: #6ee7b7; }
+    .badge-unk { background: #2d2d3a; color: #94a3b8; }
+
+    /* source badges for meters */
+    .badge-api  { background: #162d1e; color: #4ade80; font-size: 0.68rem; padding: 0.1rem 0.45rem; border-radius: 4px; font-weight: 600; }
+    .badge-calc { background: #1e2a10; color: #a3e635; font-size: 0.68rem; padding: 0.1rem 0.45rem; border-radius: 4px; font-weight: 600; }
+    .badge-na   { background: #2d2d3a; color: #64748b;  font-size: 0.68rem; padding: 0.1rem 0.45rem; border-radius: 4px; font-weight: 600; }
+
+    /* ── Tables ── */
+    .table-wrapper { overflow-x: auto; margin-top: 0.5rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    thead th {
+      text-align: left; padding: 0.6rem 1rem;
+      background: #0f1117; color: #64748b;
+      font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em;
+      border-bottom: 1px solid #2d3348;
+    }
+    tbody tr { border-bottom: 1px solid #1e2130; transition: background 0.15s; }
+    tbody tr:hover { background: #1a1f2e; }
+    tbody td { padding: 0.6rem 1rem; color: #cbd5e1; }
+    tbody td.in  { color: #34d399; font-weight: 500; }
+    tbody td.out { color: #f87171; font-weight: 500; }
+    .no-data { color: #4b5563; font-style: italic; }
+
+    .bar-cell { width: 110px; }
+    .bar-track { background: #1e2130; border-radius: 4px; height: 6px; overflow: hidden; margin-bottom: 3px; }
+    .bar-fill-in  { height: 100%; background: #34d399; border-radius: 4px; }
+    .bar-fill-out { height: 100%; background: #f87171; border-radius: 4px; }
+    .pct-label { font-size: 0.75rem; color: #64748b; }
+    .ip-mono   { font-family: 'Courier New', monospace; font-size: 0.88rem; color: #94a3b8; }
+    .resource-name { display: block; font-size: 0.75rem; color: #64748b; margin-top: 0.2rem; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ── Meter section ── */
+    .meter-section { margin-top: 1rem; }
+    .meter-dir-header {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      color: #64748b; margin: 0.85rem 0 0.4rem;
+      padding-bottom: 0.35rem; border-bottom: 1px solid #2d3348;
+    }
+    .meter-dir-header.dir-in  { color: #34d399; border-bottom-color: #162d24; }
+    .meter-dir-header.dir-out { color: #f87171; border-bottom-color: #2d1e1e; }
+
+    .meter-row {
+      display: grid;
+      grid-template-columns: 110px 1fr auto auto;
+      gap: 0.5rem 0.75rem;
+      align-items: center;
+      padding: 0.5rem 0.25rem;
+      border-bottom: 1px solid #1a1f2e;
+      font-size: 0.87rem;
+    }
+    .meter-row:last-child { border-bottom: none; }
+    .meter-id   { font-family: 'Courier New', monospace; font-size: 0.82rem; color: #7dd3fc; font-weight: 600; }
+    .meter-desc { color: #94a3b8; font-size: 0.83rem; }
+    .meter-val  { font-weight: 700; white-space: nowrap; text-align: right; }
+    .meter-val.in  { color: #34d399; }
+    .meter-val.out { color: #f87171; }
+    .meter-val.na  { color: #374151; font-weight: 400; font-style: italic; font-size: 0.8rem; }
+
+    .meter-note {
+      font-size: 0.76rem; color: #4b5563; margin-top: 0.65rem;
+      padding: 0.5rem 0.75rem; background: #0a0e18; border-radius: 6px;
+      border-left: 3px solid #1e3a5f;
+    }
+
+    /* ── Chart ── */
+    .chart-container { position: relative; height: 280px; margin-top: 0.5rem; }
+
+    /* ── IP browser ── */
+    #ip-browser {
+      display: none; margin-top: 0.75rem;
+      background: #0f1117; border: 1px solid #2d3348; border-radius: 8px; overflow: hidden;
+    }
+    #ip-browser-search {
+      width: 100%; background: #0f1117; border: none;
+      border-bottom: 1px solid #2d3348; padding: 0.6rem 1rem;
+      color: #e2e8f0; font-size: 0.88rem; outline: none;
+    }
+    #ip-browser-search::placeholder { color: #4b5563; }
+    #ip-browser table { font-size: 0.83rem; }
+    #ip-browser .ip-table-scroll { max-height: 260px; overflow-y: auto; }
+    #ip-browser thead th { position: sticky; top: 0; z-index: 1; background: #0a0d14; font-size: 0.74rem; }
+    .ip-pick-btn {
+      background: #0369a1; color: #fff; border: none; border-radius: 5px;
+      padding: 0.2rem 0.6rem; font-size: 0.76rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+    }
+    .ip-pick-btn:hover { background: #0284c7; }
+
+    /* ── VDC browser ── */
+    #vdc-browser {
+      display: none; margin-top: 1rem;
+      background: #0f1117; border: 1px solid #2d3348; border-radius: 8px; overflow: hidden;
+    }
+    #vdc-browser table { font-size: 0.85rem; }
+    #vdc-browser thead th { background: #0a0d14; font-size: 0.75rem; }
+    .vdc-pick-btn {
+      background: #0369a1; color: #fff; border: none; border-radius: 5px;
+      padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+    }
+    .vdc-pick-btn:hover { background: #0284c7; }
+
+    /* ── S3 summary cards ── */
+    .s3-summary {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-top: 0.5rem;
+    }
+
+    /* ── Projection cards ── */
+    .proj-card { border-color: #1e3a5f; }
+    .proj-controls {
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+      margin-bottom: 1.25rem;
+    }
+    .proj-months-sel { width: auto; min-width: 155px; }
+    .proj-btn {
+      padding: 0.45rem 1rem;
+      background: #0369a1; color: #fff; border: none; border-radius: 7px;
+      font-size: 0.88rem; font-weight: 600; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      transition: background 0.2s;
+    }
+    .proj-btn:hover    { background: #0284c7; }
+    .proj-btn:disabled { background: #334155; cursor: not-allowed; }
+    .proj-trend-up   { color: #fbbf24; }
+    .proj-trend-down { color: #60a5fa; }
+    .proj-trend-flat { color: #64748b; }
+
+    /* ── Flow Logs card ── */
+    .fl-card { border-color: #14532d; }
+    .fl-tabs { display: flex; gap: 0.4rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+    .fl-tab {
+      padding: 0.35rem 0.9rem; border-radius: 6px; border: 1px solid #334155;
+      background: #1e293b; color: #94a3b8; font-size: 0.82rem; font-weight: 600;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .fl-tab:hover    { border-color: #22c55e; color: #22c55e; }
+    .fl-tab.fl-active { background: #14532d; border-color: #22c55e; color: #4ade80; }
+    .fl-panel { display: none; }
+    .fl-panel.fl-visible { display: block; }
+    .fl-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem 1.25rem; margin-bottom: 1rem; }
+    .fl-info-box {
+      background: #0f172a; border: 1px solid #1e3a5f; border-radius: 8px;
+      padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.82rem; color: #94a3b8;
+    }
+    .fl-info-box strong { color: #7dd3fc; }
+    .fl-btn {
+      padding: 0.5rem 1.25rem; background: #15803d; color: #fff;
+      border: none; border-radius: 7px; font-size: 0.88rem; font-weight: 600;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem;
+      transition: background 0.2s;
+    }
+    .fl-btn:hover    { background: #16a34a; }
+    .fl-btn:disabled { background: #334155; cursor: not-allowed; }
+    .fl-result-list { margin-top: 1rem; }
+    .fl-result-row {
+      display: flex; align-items: center; gap: 0.6rem; padding: 0.4rem 0;
+      border-bottom: 1px solid #1e293b; font-size: 0.82rem;
+    }
+    .fl-ok   { color: #4ade80; }
+    .fl-skip { color: #fbbf24; }
+    .fl-err  { color: #f87171; }
+    .fl-status-tbl { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 0.75rem; }
+    .fl-status-tbl th { color: #64748b; text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #1e293b; font-weight: 600; text-transform: uppercase; font-size: 0.72rem; letter-spacing: .06em; }
+    .fl-status-tbl td { padding: 0.4rem 0.5rem; border-bottom: 1px solid #0f172a; vertical-align: top; }
+    .fl-dot-on  { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #4ade80; margin-right: 4px; }
+    .fl-dot-off { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #475569; margin-right: 4px; }
+    .fl-report-tbl { width: 100%; border-collapse: collapse; font-size: 0.79rem; margin-top: 0.75rem; }
+    .fl-report-tbl th { color: #64748b; text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid #1e293b; font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: .06em; }
+    .fl-report-tbl td { padding: 0.32rem 0.5rem; border-bottom: 1px solid #0f172a; font-family: 'Courier New', monospace; }
+    .fl-report-tbl tr:hover td { background: #1e293b; }
+    .fl-heatmap-wrap { margin-top: 0.75rem; overflow-x: auto; }
+    .fl-canvas-label { font-size: 0.75rem; color: #64748b; margin-bottom: 0.4rem; }
+    #fl-matrix-canvas { display: block; }
+    #fl-graph-canvas  { display: block; margin-top: 1.5rem; }
+    .fl-legend { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; color: #64748b; margin-top: 0.5rem; }
+    .fl-legend-bar { width: 120px; height: 10px; border-radius: 3px; background: linear-gradient(to right, #1e3a5f, #0ea5e9, #f97316, #ef4444); }
+
+    @media (max-width: 640px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .form-group.full-width { grid-column: auto; }
+      .chart-container { height: 220px; }
+      .mode-group { grid-template-columns: 1fr; }
+      .meter-row  { grid-template-columns: 90px 1fr; }
+      .meter-row > :nth-child(3), .meter-row > :nth-child(4) { grid-column: 2; }
+      .fl-form-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="header-logo">
+      <img src="/ionos-logo.svg" alt="IONOS" />
+    </div>
+    <div class="header-title">
+      <h1>IONOS Traffic Billing Tool</h1>
+      <p>Query IP traffic, VDC aggregate traffic, and S3 Object Storage billing</p>
+    </div>
+    <div class="header-spacer"></div>
+  </header>
+
+  <!-- ── Mode selector ── -->
+  <div class="card" style="padding:1.25rem 1.5rem">
+    <div class="mode-group">
+      <label>
+        <input class="mode-radio" type="radio" name="mode" value="ip" checked />
+        <div class="mode-option">
+          <span class="mode-icon">&#128269;</span>
+          <span class="mode-title">IP Traffic</span>
+          <span class="mode-desc">Single public IP lookup with DNS and device info</span>
+        </div>
+      </label>
+      <label>
+        <input class="mode-radio" type="radio" name="mode" value="vdc" />
+        <div class="mode-option">
+          <span class="mode-icon">&#127760;</span>
+          <span class="mode-title">VDC Traffic</span>
+          <span class="mode-desc">Aggregate across all IPs in a VDC with meter breakdown</span>
+        </div>
+      </label>
+      <label>
+        <input class="mode-radio" type="radio" name="mode" value="s3" />
+        <div class="mode-option">
+          <span class="mode-icon">&#129524;</span>
+          <span class="mode-title">S3 Storage</span>
+          <span class="mode-desc">Object Storage traffic billing by meter ID</span>
+        </div>
+      </label>
+    </div>
+  </div>
+
+  <!-- ── Query form ── -->
+  <div class="card">
+    <h2>&#9881;&#65039; Query Parameters</h2>
+    <form id="query-form">
+      <div class="form-grid">
+
+        <!-- Shared: token -->
+        <div class="form-group full-width">
+          <label for="token">Bearer Token</label>
+          <input type="password" id="token" placeholder="Paste your IONOS Bearer Token" autocomplete="off" required />
+          <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;flex-wrap:wrap">
+            <label for="env-file-upload"
+              style="display:inline-flex;align-items:center;gap:0.4rem;background:#1e293b;border:1px solid #334155;
+                     color:#94a3b8;border-radius:6px;padding:0.3rem 0.75rem;font-size:0.78rem;cursor:pointer;
+                     white-space:nowrap;user-select:none">
+              &#128194; Load .env file
+            </label>
+            <input type="file" id="env-file-upload" accept=".env,text/plain" style="display:none" />
+            <div id="env-loaded-banner" style="display:none;font-size:0.78rem;color:#6ee7b7">
+              &#10003; Credentials pre-loaded from <code style="background:#0f172a;padding:1px 4px;border-radius:3px">.env</code>
+            </div>
+          </div>
+        </div>
+
+        <!-- Shared: contract ID -->
+        <div class="form-group">
+          <label for="contractId">Contract ID</label>
+          <input type="text" id="contractId" placeholder="e.g. 31867090" required />
+        </div>
+
+        <!-- Shared: billing period -->
+        <div class="form-group">
+          <label id="period-label">Billing Period</label>
+          <div class="period-row">
+            <select id="period-month" required>
+              <option value="01">January</option><option value="02">February</option>
+              <option value="03">March</option><option value="04">April</option>
+              <option value="05">May</option><option value="06">June</option>
+              <option value="07">July</option><option value="08">August</option>
+              <option value="09">September</option><option value="10">October</option>
+              <option value="11">November</option><option value="12">December</option>
+            </select>
+            <select id="period-year" required></select>
+          </div>
+          <select id="period-range" style="margin-top:0.5rem">
+            <option value="1">Single month</option>
+            <option value="3">Last quarter (3 months)</option>
+            <option value="6">Last 6 months</option>
+            <option value="12">Last year (12 months)</option>
+          </select>
+          <div class="field-note" id="range-end-note" style="display:none">Selected month is used as the end of the range</div>
+        </div>
+
+        <!-- Shared: market + rate (hidden in S3 mode) -->
+        <div class="form-group" id="market-group">
+          <label for="market">Market</label>
+          <select id="market">
+            <option value="EU">Europe (EUR)</option>
+            <option value="UK">United Kingdom (GBP)</option>
+            <option value="US">United States (USD)</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="rate-group">
+          <label for="rate">Outbound Rate (per GB)</label>
+          <input type="number" id="rate" step="0.0001" min="0" value="0.01" required />
+          <div class="rate-note">First 2 TB (2048 GB) outbound is free — verify against your contract</div>
+        </div>
+
+        <!-- IP-mode specific -->
+        <div class="form-group full-width" id="ip-field-group">
+          <label for="targetIp">IP Address</label>
+          <input type="text" id="targetIp" placeholder="e.g. 1.2.3.4" />
+          <button type="button" class="browse-btn" id="browse-ip-btn">
+            <span class="browse-spinner" id="browse-ip-spinner"></span>
+            &#128065; Browse IP addresses
+          </button>
+          <div id="ip-browser">
+            <input type="text" id="ip-browser-search" placeholder="Filter by IP, VDC, location or device type…" />
+            <div class="ip-table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:22%">IP Address</th>
+                    <th style="width:30%">VDC Name</th>
+                    <th style="width:13%">Location</th>
+                    <th style="width:27%">Device / Resource</th>
+                    <th style="width:8%"></th>
+                  </tr>
+                </thead>
+                <tbody id="ip-browser-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- VDC-mode specific -->
+        <div class="form-group full-width" id="vdc-field-group" style="display:none">
+          <label for="vdcQuery">Customer VDC Name</label>
+          <input type="text" id="vdcQuery" placeholder="Type VDC name or paste datacenter UUID" />
+          <input type="hidden" id="vdcQueryId" value="" />
+          <div class="field-note">Enter name as it appears in IONOS DCD — or click Browse</div>
+          <button type="button" class="browse-btn" id="browse-vdc-btn">
+            <span class="browse-spinner" id="browse-vdc-spinner"></span>
+            &#128065; Browse my VDCs
+          </button>
+          <div id="vdc-browser">
+            <table>
+              <thead><tr><th>VDC Name</th><th>Location</th><th></th></tr></thead>
+              <tbody id="vdc-browser-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- S3 mode: no extra field, just a note -->
+        <div class="form-group full-width" id="s3-field-group" style="display:none">
+          <div class="field-note" style="font-size:0.85rem;color:#64748b;padding:0.5rem 0.75rem;background:#0a0e18;border-radius:8px;border-left:3px solid #1e3a5f">
+            S3 Object Storage traffic is queried at contract level — no additional fields required.
+            Meter data is fetched from the IONOS Billing API for the selected period.
+          </div>
+        </div>
+
+      </div>
+
+      <button type="submit" id="submit-btn">
+        <span id="btn-label">Query Traffic</span>
+        <span class="spinner" id="spinner"></span>
+      </button>
+    </form>
+  </div>
+
+  <div id="error-box"></div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <!-- IP Results                                                   -->
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <div id="ip-results" style="display:none">
+    <div class="card">
+      <h2>&#128202; Monthly Summary</h2>
+      <div class="summary-grid" id="ip-summary-grid"></div>
+    </div>
+    <div class="card">
+      <h2>&#128200; Daily Traffic Chart</h2>
+      <div class="chart-container"><canvas id="ip-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>&#128197; Daily Breakdown</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Date</th><th>Inbound</th><th></th><th>Outbound</th><th></th></tr></thead>
+          <tbody id="ip-daily-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <!-- IP Projection (standalone — visible after single-month and range queries) -->
+  <div class="card proj-card" id="ip-proj-card" style="display:none">
+    <h2>📈 Next Month Traffic and Cost Projection</h2>
+    <div class="proj-controls">
+      <label style="font-size:0.85rem;color:#94a3b8;font-weight:500">Base projection on</label>
+      <select id="ip-proj-months" class="proj-months-sel">
+        <option value="2">last 2 months</option>
+        <option value="3" selected>last 3 months</option>
+        <option value="6">last 6 months</option>
+        <option value="12">last 12 months</option>
+      </select>
+      <button type="button" class="proj-btn" id="ip-proj-btn">
+        <span id="ip-proj-label">Calculate Projection</span>
+        <span class="browse-spinner" id="ip-proj-spinner"></span>
+      </button>
+    </div>
+    <div id="ip-proj-result"></div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <!-- VDC Results                                                  -->
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <div id="vdc-results" style="display:none">
+    <div class="card">
+      <h2>&#128202; VDC Monthly Summary</h2>
+      <div class="summary-grid" id="vdc-summary-grid"></div>
+    </div>
+    <div class="card">
+      <h2>&#128200; Daily Traffic Chart</h2>
+      <div class="chart-container"><canvas id="vdc-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>&#127760; IP Breakdown</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>IP Address</th><th>Device / Resource</th><th>NIC</th><th>LAN</th>
+              <th>Inbound</th><th>Outbound</th><th>% of VDC Out</th>
+            </tr>
+          </thead>
+          <tbody id="vdc-ip-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Traffic Meter ID Breakdown -->
+    <div class="card">
+      <h2>🔢 Traffic Meter ID Breakdown</h2>
+      <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">
+        IONOS billing meter IDs for network traffic on this contract and period.
+      </p>
+      <div id="traffic-meter-section"></div>
+    </div>
+
+    <!-- S3 Storage Traffic (same contract) -->
+    <div class="card">
+      <h2>&#129524; S3 Storage Traffic Meters</h2>
+      <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">
+        Object Storage data transfer meters for Contract ID <strong id="vdc-s3-contract-id" style="color:#7dd3fc"></strong>.
+      </p>
+      <div id="vdc-s3-meter-section"></div>
+    </div>
+  </div>
+  <!-- VDC Projection (standalone — visible after single-month and range queries) -->
+  <div class="card proj-card" id="vdc-proj-card" style="display:none">
+    <h2>📈 Next Month Traffic and Cost Projection</h2>
+    <div class="proj-controls">
+      <label style="font-size:0.85rem;color:#94a3b8;font-weight:500">Base projection on</label>
+      <select id="vdc-proj-months" class="proj-months-sel">
+        <option value="2">last 2 months</option>
+        <option value="3" selected>last 3 months</option>
+        <option value="6">last 6 months</option>
+        <option value="12">last 12 months</option>
+      </select>
+      <button type="button" class="proj-btn" id="vdc-proj-btn">
+        <span id="vdc-proj-label">Calculate Projection</span>
+        <span class="browse-spinner" id="vdc-proj-spinner"></span>
+      </button>
+    </div>
+    <div id="vdc-proj-result"></div>
+  </div>
+
+  <!-- Flow Logs card (standalone — visible after VDC query) -->
+  <div class="card fl-card" id="vdc-flowlogs-card" style="display:none">
+    <h2>🌊 Flow Logs</h2>
+    <div class="fl-tabs">
+      <button class="fl-tab fl-active" data-tab="fl-setup">Setup</button>
+      <button class="fl-tab" data-tab="fl-status">Status</button>
+      <button class="fl-tab" data-tab="fl-report">Report</button>
+      <button class="fl-tab" data-tab="fl-heatmap">Heat Map</button>
+    </div>
+
+    <!-- Setup panel -->
+    <div id="fl-setup" class="fl-panel fl-visible">
+      <div class="fl-info-box" id="fl-dc-info">Run a VDC query first to detect the datacenter location and nearest S3 region.</div>
+      <div class="fl-form-grid">
+        <div class="form-group">
+          <label>S3 Access Key</label>
+          <input type="text" id="fl-s3-key" placeholder="IONOS Object Storage access key" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>S3 Secret Key</label>
+          <input type="password" id="fl-s3-secret" placeholder="Secret key" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Bucket Name</label>
+          <input type="text" id="fl-bucket" placeholder="e.g. ionos-flowlogs-myvdc">
+        </div>
+        <div class="form-group">
+          <label style="color:#64748b">S3 Region <span style="font-weight:400">(auto-detected)</span></label>
+          <input type="text" id="fl-s3-region-display" readonly style="color:#7dd3fc;background:#0f172a">
+        </div>
+        <div class="form-group">
+          <label>Log Retention</label>
+          <select id="fl-retention" class="proj-months-sel" style="min-width:160px">
+            <option value="0">Keep forever</option>
+            <option value="7">Delete after 7 days</option>
+            <option value="14">Delete after 14 days</option>
+            <option value="30" selected>Delete after 30 days</option>
+            <option value="60">Delete after 60 days</option>
+            <option value="90">Delete after 90 days</option>
+          </select>
+        </div>
+      </div>
+      <button class="fl-btn" id="fl-activate-btn">
+        <span id="fl-activate-label">Activate Flow Logs</span>
+        <span class="browse-spinner" id="fl-activate-spinner"></span>
+      </button>
+      <div class="fl-result-list" id="fl-activate-results"></div>
+    </div>
+
+    <!-- Status panel -->
+    <div id="fl-status" class="fl-panel">
+      <button class="fl-btn" id="fl-status-btn" style="margin-bottom:1rem">
+        <span>Check Status</span>
+        <span class="browse-spinner" id="fl-status-spinner"></span>
+      </button>
+      <div id="fl-status-results"></div>
+    </div>
+
+    <!-- Report panel -->
+    <div id="fl-report" class="fl-panel">
+      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
+        <button class="fl-btn" id="fl-report-btn">
+          <span>Load Logs</span>
+          <span class="browse-spinner" id="fl-report-spinner"></span>
+        </button>
+        <div class="form-group" style="margin:0;display:flex;align-items:center;gap:0.5rem">
+          <label style="white-space:nowrap;margin:0;font-size:0.82rem">Time window</label>
+          <select id="fl-time-window" class="proj-months-sel" style="min-width:110px">
+            <option value="0">All time</option>
+            <option value="300">Last 5 min</option>
+            <option value="600">Last 10 min</option>
+            <option value="1800">Last 30 min</option>
+            <option value="3600" selected>Last 1 hr</option>
+            <option value="14400">Last 4 hr</option>
+            <option value="86400">Last 24 hr</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;display:flex;align-items:center;gap:0.5rem">
+          <label style="white-space:nowrap;margin:0;font-size:0.82rem">Max files</label>
+          <select id="fl-max-files" class="proj-months-sel" style="min-width:80px">
+            <option value="20">20</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+          </select>
+        </div>
+      </div>
+      <div id="fl-report-meta" style="font-size:0.8rem;color:#64748b;margin-bottom:0.5rem"></div>
+      <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.6rem">
+        <input id="fl-ip-filter" list="fl-ip-datalist" type="text"
+          placeholder="Filter by IP address…"
+          style="flex:1;max-width:260px;background:#0f172a;border:1px solid #334155;color:#e2e8f0;
+                 padding:0.35rem 0.65rem;border-radius:6px;font-size:0.83rem;outline:none">
+        <datalist id="fl-ip-datalist"></datalist>
+        <button id="fl-ip-clear" style="display:none;background:none;border:none;color:#64748b;
+                cursor:pointer;font-size:0.8rem;padding:0.2rem 0.4rem">&#x2715; Clear</button>
+        <span id="fl-ip-filter-count" style="font-size:0.78rem;color:#64748b"></span>
+      </div>
+      <div class="table-wrapper">
+        <table class="fl-report-tbl">
+          <thead><tr>
+            <th>First Seen</th><th>Src IP</th><th>Dst IP</th><th>Proto</th><th>Dst Port</th>
+            <th>Packets</th><th>Bytes</th><th>Flows</th><th>Action</th>
+          </tr></thead>
+          <tbody id="fl-report-tbody"><tr><td colspan="9" class="no-data">Load logs to see data.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Heat Map panel -->
+    <div id="fl-heatmap" class="fl-panel">
+      <div id="fl-heatmap-empty" style="color:#64748b;font-size:0.85rem">Load the Report first, then switch here to render the heat map.</div>
+      <div id="fl-heatmap-content" style="display:none">
+        <p class="fl-canvas-label">Traffic Matrix — cell colour = outbound bytes (log scale). Hover for details.</p>
+        <div class="fl-heatmap-wrap"><canvas id="fl-matrix-canvas"></canvas></div>
+        <div class="fl-legend">
+          <span>Low</span><div class="fl-legend-bar"></div><span>High</span>
+        </div>
+        <p class="fl-canvas-label" style="margin-top:1.5rem">Network Graph — node size = total bytes, edge width = flow volume.</p>
+        <div class="fl-heatmap-wrap"><canvas id="fl-graph-canvas"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <!-- S3 Results                                                   -->
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <div id="s3-results" style="display:none">
+    <div class="card">
+      <h2>&#129524; S3 Object Storage Traffic Summary</h2>
+      <div class="s3-summary" id="s3-summary-grid"></div>
+    </div>
+    <!-- S3 Projection -->
+    <div class="card proj-card" id="s3-proj-card">
+      <h2>📈 Next Month S3 Traffic Projection</h2>
+      <div class="proj-controls">
+        <label style="font-size:0.85rem;color:#94a3b8;font-weight:500">Base projection on</label>
+        <select id="s3-proj-months" class="proj-months-sel">
+          <option value="2">last 2 months</option>
+          <option value="3" selected>last 3 months</option>
+          <option value="6">last 6 months</option>
+          <option value="12">last 12 months</option>
+        </select>
+        <button type="button" class="proj-btn" id="s3-proj-btn">
+          <span id="s3-proj-label">Calculate Projection</span>
+          <span class="browse-spinner" id="s3-proj-spinner"></span>
+        </button>
+      </div>
+      <div id="s3-proj-result"></div>
+    </div>
+    <div class="card">
+      <h2>&#128290; S3 Storage Traffic Meters</h2>
+      <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">
+        Meter IDs for Object Storage data transfer — Contract <strong id="s3-contract-id-label" style="color:#7dd3fc"></strong>.
+      </p>
+      <div id="s3-meter-section"></div>
+    </div>
+    <div class="card" id="s3-vdc-traffic-card">
+      <h2>&#128290; VDC Traffic Meters (reference)</h2>
+      <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">Network traffic billing tiers for this contract.</p>
+      <div id="s3-traffic-meter-section"></div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <!-- Range Results                                                -->
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <div id="range-results" style="display:none">
+    <div class="card">
+      <h2 id="range-title">&#128202; Range Summary</h2>
+      <div class="summary-grid" id="range-summary-grid"></div>
+    </div>
+    <div class="card">
+      <h2 id="range-chart-title">&#128200; Monthly Traffic Chart</h2>
+      <div class="chart-container"><canvas id="range-chart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>&#128197; Monthly Breakdown</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Month</th><th>Inbound</th><th>Outbound</th></tr></thead>
+          <tbody id="range-monthly-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<!-- Credential password modal -->
+<div id="env-auth-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);
+     z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#1e293b;border:1px solid #334155;border-radius:12px;
+              padding:2rem;width:100%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
+    <div style="font-size:1rem;font-weight:700;color:#e2e8f0;margin-bottom:0.25rem">
+      🔒 Saved Credentials
+    </div>
+    <div id="env-auth-username" style="font-size:0.8rem;color:#64748b;margin-bottom:1.25rem"></div>
+    <label style="font-size:0.8rem;color:#94a3b8;display:block;margin-bottom:0.35rem">Password</label>
+    <input id="env-auth-password" type="password" autocomplete="current-password"
+      placeholder="Enter password"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;
+             color:#e2e8f0;padding:0.5rem 0.75rem;border-radius:6px;font-size:0.9rem;
+             outline:none;margin-bottom:0.5rem">
+    <div id="env-auth-error" style="display:none;font-size:0.78rem;color:#f87171;margin-bottom:0.5rem">
+      Incorrect password — credentials not loaded.
+    </div>
+    <div style="display:flex;gap:0.75rem;margin-top:0.75rem">
+      <button id="env-auth-submit"
+        style="flex:1;background:#0ea5e9;color:#fff;border:none;border-radius:6px;
+               padding:0.5rem;font-size:0.9rem;font-weight:600;cursor:pointer">
+        Load Credentials
+      </button>
+      <button id="env-auth-skip"
+        style="background:none;border:1px solid #475569;color:#cbd5e1;border-radius:6px;
+               padding:0.5rem 0.9rem;font-size:0.85rem;cursor:pointer">
+        Skip
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── Utilities ───────────────────────────────────────────────────────────────
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function formatGB(v) {
+    if (v === 0 || v === null || v === undefined) return '0 GB';
+    if (v < 0.001) return '< 0.001 GB';
+    return v.toFixed(4).replace(/\.?0+$/, '') + ' GB';
+  }
+  function showError(msg) {
+    const el = document.getElementById('error-box');
+    el.textContent = msg; el.style.display = 'block';
+    hideAllResults();
+  }
+  function hideError() { document.getElementById('error-box').style.display = 'none'; }
+  function hideAllResults() {
+    ['ip-results','vdc-results','s3-results','range-results','ip-proj-card','vdc-proj-card','vdc-flowlogs-card'].forEach(id =>
+      document.getElementById(id).style.display = 'none'
+    );
+  }
+  function setLoading(on) {
+    const btn   = document.getElementById('submit-btn');
+    const lbl   = document.getElementById('btn-label');
+    const spin  = document.getElementById('spinner');
+    btn.disabled       = on;
+    lbl.style.display  = on ? 'none'   : 'inline';
+    spin.style.display = on ? 'block'  : 'none';
+  }
+
+  const MARKETS = {
+    EU: { symbol: '€', currency: 'EUR', rate: 0.01 },
+    UK: { symbol: '£', currency: 'GBP', rate: 0.01 },
+    US: { symbol: '$', currency: 'USD', rate: 0.01 }
+  };
+
+  const DEVICE_BADGE = {
+    'Network Load Balancer':    'badge-nlb',
+    'Application Load Balancer':'badge-alb',
+    'NAT Gateway':              'badge-nat',
+    'Kubernetes Node':          'badge-k8s',
+    'K8s Worker':               'badge-k8s',
+    'Standard VDC / Cluster':  'badge-vdc',
+    'Server':                   'badge-srv',
+  };
+
+  // Meter metadata (mirrors server)
+  const TRAFFIC_METER_INFO = {
+    CTI1000: { label: '1 GB cumulative traffic inbound',               dir: 'in'  },
+    CTO0000: { label: '1 GB cumulative traffic outbound, first 2 TB',  dir: 'out' },
+    CTO1100: { label: '1 GB cumulative traffic outbound, next 8 TB',   dir: 'out' },
+    CTO1200: { label: '1 GB cumulative traffic outbound, next 40 TB',  dir: 'out' },
+  };
+  const S3_METER_INFO = {
+    S3TI2100: { label: '1 GB Object Storage external inbound data',                                              dir: 'in'  },
+    S3TI2200: { label: '1 GB Object Storage internal inbound data transfer',                                     dir: 'in'  },
+    S3TO2100: { label: '1 GB Object Storage common traffic outbound',                                            dir: 'out' },
+    S3TO2200: { label: '1 GB Object Storage internal traffic outbound',                                          dir: 'out' },
+    S3TO2300: { label: '1 GB Object Storage IONOS national outbound data transfer for contract-owned buckets',   dir: 'out' },
+  };
+
+  // ── Projection state ────────────────────────────────────────────────────────
+  let lastQueryParams = null;
+
+  // Move a mode's projection card to be the immediate next sibling of the given
+  // chart canvas's parent card, then make it visible.
+  function placeAndShowProjCard(mode, chartId) {
+    const card = document.getElementById(`${mode}-proj-card`);
+    document.getElementById(chartId).closest('.card').insertAdjacentElement('afterend', card);
+    card.style.display = '';
+  }
+
+  function makeGauge(gid, label, needlePct, valueText, noteText, valueColor) {
+    const clamped  = Math.max(-100, Math.min(100, needlePct || 0));
+    const rotation = ((clamped / 100) * 90).toFixed(1);
+    // Arc: centre (100,90), radius 80. Endpoints: (20,90) left, (180,90) right.
+    // Single path with gradient stroke — no segment kinks.
+    return `
+    <div style="display:flex;flex-direction:column;align-items:center;gap:0.3rem;flex:1;min-width:165px">
+      <svg viewBox="0 0 200 108" style="width:175px;height:auto;display:block;overflow:visible">
+        <defs>
+          <linearGradient id="gg${gid}" x1="20" y1="0" x2="180" y2="0" gradientUnits="userSpaceOnUse">
+            <stop offset="0%"   stop-color="#22c55e"/>
+            <stop offset="48%"  stop-color="#f59e0b"/>
+            <stop offset="100%" stop-color="#ef4444"/>
+          </linearGradient>
+        </defs>
+        <!-- shadow track — two 90° arcs via apex to avoid ambiguous 180° sweep -->
+        <path d="M 20,90 A 80,80 0 0,1 100,10 A 80,80 0 0,1 180,90"
+          fill="none" stroke="#0d1117" stroke-width="20" stroke-linecap="round"/>
+        <!-- gradient arc -->
+        <path d="M 20,90 A 80,80 0 0,1 100,10 A 80,80 0 0,1 180,90"
+          fill="none" stroke="url(#gg${gid})" stroke-width="13" stroke-linecap="round"/>
+        <!-- needle shadow -->
+        <line x1="100" y1="90" x2="100" y2="18"
+          stroke="#000" stroke-width="3" stroke-linecap="round" opacity="0.4"
+          transform="rotate(${rotation}, 100, 90)"/>
+        <!-- needle -->
+        <line x1="100" y1="90" x2="100" y2="18"
+          stroke="#f1f5f9" stroke-width="2" stroke-linecap="round"
+          transform="rotate(${rotation}, 100, 90)"/>
+        <!-- pivot -->
+        <circle cx="100" cy="90" r="5.5" fill="#1e2130" stroke="#94a3b8" stroke-width="1.5"/>
+        <!-- Less / More labels -->
+        <text x="8"   y="106" fill="#86efac" font-size="9.5" font-family="sans-serif">Less</text>
+        <text x="192" y="106" fill="#fca5a5" font-size="9.5" font-family="sans-serif" text-anchor="end">More</text>
+      </svg>
+      <div style="font-size:1.05rem;font-weight:700;color:${valueColor || '#e2e8f0'};line-height:1.1;margin-top:0.1rem">${escHtml(valueText)}</div>
+      <div style="font-size:0.72rem;color:#64748b;text-align:center;max-width:165px">${escHtml(noteText)}</div>
+      <div style="font-size:0.68rem;color:#475569;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;margin-top:0.1rem">${escHtml(label)}</div>
+    </div>`;
+  }
+
+  function renderProjection(containerId, data, marketKey, ratePerGB) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const p = data.projection;
+    if (p.insufficient) {
+      el.innerHTML = `<div class="meter-note">Not enough historical data — need at least 2 months with traffic to project.</div>`;
+      return;
+    }
+    const trendClass = pct => pct > 0 ? 'proj-trend-up' : pct < 0 ? 'proj-trend-down' : 'proj-trend-flat';
+    const trendArrow = pct => pct > 0 ? '▲' : pct < 0 ? '▼' : '─';
+
+    const market   = MARKETS[marketKey] || MARKETS.EU;
+    const FREE_GB  = 2048;
+    const billable = Math.max(0, p.outGB - FREE_GB);
+    const cost     = billable * (ratePerGB || 0);
+    const costFmt  = market.symbol + cost.toFixed(2) + ' ' + market.currency;
+    const costNote = p.outGB <= FREE_GB
+      ? 'within free 2 TB allowance'
+      : `${billable.toFixed(2)} GB billable after 2 TB free`;
+
+    const trafficNeedle = p.outTrendPct || 0;
+    const trafficColor  = trafficNeedle > 5 ? '#fb923c' : trafficNeedle < -5 ? '#6ee7b7' : '#e2e8f0';
+    const trafficNote   = `${trendArrow(p.outTrendPct)} ${Math.abs(p.outTrendPct)}% monthly trend`;
+
+    const costNeedle = p.outGB <= FREE_GB ? -100 : Math.min(100, (billable / FREE_GB) * 200 - 100);
+    const costColor  = cost === 0 ? '#6ee7b7' : cost < 10 ? '#f59e0b' : '#ef4444';
+
+    let html = `
+      <!-- Gauges -->
+      <div style="display:flex;gap:2rem;justify-content:center;flex-wrap:wrap;padding:1rem 0 1.25rem;border-bottom:1px solid #2d3348;margin-bottom:1.25rem">
+        ${makeGauge('trf', 'Projected Outbound', trafficNeedle, formatGB(p.outGB), trafficNote, trafficColor)}
+        ${makeGauge('cst', 'Projected Cost', costNeedle, costFmt, costNote, costColor)}
+      </div>
+
+      <!-- Projection summary -->
+      <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:0.75rem">
+        Projection for <span style="color:#7dd3fc">${escHtml(p.period)}</span>
+      </div>
+      <div class="summary-grid" style="margin-bottom:1.5rem">
+        <div class="stat-card">
+          <div class="stat-label">Projected Inbound</div>
+          <div class="stat-value hi-in">${formatGB(p.inGB)}</div>
+          <div class="rate-note ${trendClass(p.inTrendPct)}">${trendArrow(p.inTrendPct)} ${Math.abs(p.inTrendPct)}% avg monthly change</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Projected Outbound</div>
+          <div class="stat-value hi-out">${formatGB(p.outGB)}</div>
+          <div class="rate-note ${trendClass(p.outTrendPct)}">${trendArrow(p.outTrendPct)} ${Math.abs(p.outTrendPct)}% avg monthly change</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Projected Cost (${escHtml(market.currency)} @ ${escHtml(market.symbol)}${ratePerGB}/GB)</div>
+          <div class="stat-value hi-cost">${escHtml(costFmt)}</div>
+          <div class="rate-note">${escHtml(costNote)}</div>
+        </div>
+      </div>
+
+      <!-- Historical data -->
+      <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;margin-bottom:0.5rem">
+        Historical data used (${escHtml(String(p.dataPoints))} month${p.dataPoints === 1 ? '' : 's'})
+      </div>
+      <div class="table-wrapper" style="margin-bottom:1rem">
+        <table>
+          <thead><tr><th>Period</th><th>Inbound</th><th>Outbound</th></tr></thead>
+          <tbody>
+            ${data.history.map(h => `<tr>
+              <td style="font-family:'Courier New',monospace;color:#94a3b8;font-size:0.87rem">${escHtml(h.period)}</td>
+              <td class="${h.ok && h.inGB != null ? 'in' : 'no-data'}">${h.ok && h.inGB != null ? formatGB(h.inGB) : 'No data'}</td>
+              <td class="${h.ok && h.outGB != null ? 'out' : 'no-data'}">${h.ok && h.outGB != null ? formatGB(h.outGB) : 'No data'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="meter-note">
+        Linear regression over ${escHtml(String(p.dataPoints))} months of history. Trend % = average month-over-month change. Yellow = growing, blue = declining.
+      </div>`;
+    el.innerHTML = html;
+  }
+
+  async function runProjection(mode) {
+    if (!lastQueryParams) { alert('Run a query first, then calculate the projection.'); return; }
+    const monthsSel = document.getElementById(`${mode}-proj-months`);
+    const btn       = document.getElementById(`${mode}-proj-btn`);
+    const lbl       = document.getElementById(`${mode}-proj-label`);
+    const spin      = document.getElementById(`${mode}-proj-spinner`);
+    const marketKey = document.getElementById('market').value;
+    const ratePerGB = parseFloat(document.getElementById('rate').value) || 0;
+    btn.disabled = true; lbl.style.display = 'none'; spin.style.display = 'inline-block';
+    try {
+      const r = await fetch('/api/project', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...lastQueryParams, months: parseInt(monthsSel.value, 10), mode })
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || `Error ${r.status}`); return; }
+      renderProjection(`${mode}-proj-result`, d, marketKey, ratePerGB);
+    } catch (err) { alert('Network error: ' + err.message); }
+    finally { btn.disabled = false; lbl.style.display = 'inline'; spin.style.display = 'none'; }
+  }
+
+  // ── Range selector ──────────────────────────────────────────────────────────
+  document.getElementById('period-range').addEventListener('change', function () {
+    const isRange = parseInt(this.value, 10) > 1;
+    document.getElementById('period-label').textContent    = isRange ? 'End Period' : 'Billing Period';
+    document.getElementById('range-end-note').style.display = isRange ? '' : 'none';
+  });
+
+  function renderRangeResults(d, mode, marketKey, ratePerGB) {
+    const modeLabels = { ip: 'IP Traffic', vdc: 'VDC Traffic', s3: 'S3 Storage' };
+    const n     = d.monthlyData.length;
+    const start = d.monthlyData[0]?.period || '';
+    const end   = d.monthlyData[n - 1]?.period || '';
+    document.getElementById('range-title').textContent = `${modeLabels[mode] || mode} — ${n}-Month Summary`;
+
+    const market   = MARKETS[marketKey] || MARKETS.EU;
+    const FREE_GB  = 2048;
+    const billable = Math.max(0, d.totals.outGB - FREE_GB);
+    const cost     = billable * ratePerGB;
+    const costFmt  = market.symbol + cost.toFixed(2) + ' ' + market.currency;
+    const costNote = d.totals.outGB <= FREE_GB
+      ? '(within free 2 TB allowance)'
+      : `(${billable.toFixed(2)} GB billable after 2 TB free)`;
+
+    let summaryHtml = `
+      <div class="stat-card"><div class="stat-label">Date Range</div><div class="stat-value" style="font-size:0.9rem;word-break:normal">${escHtml(start)} → ${escHtml(end)}</div></div>`;
+    if (d.vdcName) {
+      summaryHtml += `<div class="stat-card"><div class="stat-label">VDC</div><div class="stat-value" style="font-size:0.95rem">${escHtml(d.vdcName)}</div></div>`;
+    }
+    summaryHtml += `
+      <div class="stat-card"><div class="stat-label">Total Inbound</div><div class="stat-value hi-in">${formatGB(d.totals.inGB)}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Outbound</div><div class="stat-value hi-out">${formatGB(d.totals.outGB)}</div></div>`;
+    if (mode !== 's3') {
+      summaryHtml += `<div class="stat-card"><div class="stat-label">Est. Cost (${escHtml(market.currency)} @ ${escHtml(market.symbol)}${ratePerGB}/GB)</div><div class="stat-value hi-cost">${escHtml(costFmt)}</div><div class="rate-note">${escHtml(costNote)}</div></div>`;
+    }
+    document.getElementById('range-summary-grid').innerHTML = summaryHtml;
+
+    const chartData = d.dailyData
+      ? d.dailyData
+      : d.monthlyData.map(m => ({ date: m.period, inGB: m.ok ? m.inGB : 0, outGB: m.ok ? m.outGB : 0 }));
+    document.getElementById('range-chart-title').textContent = d.dailyData
+      ? '\u{1F4C8} Daily Traffic Chart'
+      : '\u{1F4C8} Monthly Traffic Chart';
+    rangeChart = buildChart('range-chart', rangeChart, chartData);
+
+    const tbody = document.getElementById('range-monthly-tbody');
+    tbody.innerHTML = d.monthlyData.map(m => `
+      <tr>
+        <td style="font-family:'Courier New',monospace;color:#94a3b8">${escHtml(m.period)}</td>
+        <td class="${m.ok ? 'in' : 'no-data'}">${m.ok ? formatGB(m.inGB) : 'No data'}</td>
+        <td class="${m.ok ? 'out' : 'no-data'}">${m.ok ? formatGB(m.outGB) : 'No data'}</td>
+      </tr>`).join('');
+
+    document.getElementById('range-results').style.display = '';
+    document.getElementById('range-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ── Mode switching ──────────────────────────────────────────────────────────
+
+  function currentMode() {
+    return document.querySelector('input[name="mode"]:checked')?.value || 'ip';
+  }
+
+  function applyMode(mode) {
+    // Field groups
+    document.getElementById('ip-field-group').style.display  = mode === 'ip'  ? '' : 'none';
+    document.getElementById('vdc-field-group').style.display = mode === 'vdc' ? '' : 'none';
+    document.getElementById('s3-field-group').style.display  = mode === 's3'  ? '' : 'none';
+    // Market/rate not needed for S3
+    document.getElementById('market-group').style.display    = mode === 's3'  ? 'none' : '';
+    document.getElementById('rate-group').style.display      = mode === 's3'  ? 'none' : '';
+    // Required attributes
+    document.getElementById('targetIp').required  = mode === 'ip';
+    document.getElementById('vdcQuery').required  = mode === 'vdc';
+    // Button label
+    const labels = { ip: 'Query IP Traffic', vdc: 'Query VDC Traffic', s3: 'Query S3 Billing' };
+    document.getElementById('btn-label').textContent = labels[mode];
+    // Clear results
+    hideAllResults();
+    hideError();
+  }
+
+  document.querySelectorAll('input[name="mode"]').forEach(r => {
+    r.addEventListener('change', () => applyMode(currentMode()));
+    // Style the selected card on click
+    r.addEventListener('change', () => {
+      document.querySelectorAll('.mode-option').forEach(el => el.style.borderColor = '');
+    });
+  });
+
+  // ── Period defaults ─────────────────────────────────────────────────────────
+  (function () {
+    const now       = new Date();
+    const last      = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const defYear   = last.getFullYear();
+    const defMonth  = String(last.getMonth() + 1).padStart(2, '0');
+    const yearSel   = document.getElementById('period-year');
+    for (let y = defYear + 1; y >= 2017; y--) {
+      const opt = document.createElement('option');
+      opt.value = String(y); opt.textContent = String(y);
+      if (y === defYear) opt.selected = true;
+      yearSel.appendChild(opt);
+    }
+    document.getElementById('period-month').value = defMonth;
+  })();
+
+  document.getElementById('market').addEventListener('change', function () {
+    document.getElementById('rate').value = MARKETS[this.value].rate;
+  });
+
+  // ── Chart helpers ───────────────────────────────────────────────────────────
+  let ipChart    = null;
+  let vdcChart   = null;
+  let rangeChart = null;
+
+  function buildChart(canvasId, chartRef, dates) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    if (chartRef) chartRef.destroy();
+    return new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: dates.map(d => d.date),
+        datasets: [
+          { label: 'Inbound (GB)',  data: dates.map(d => d.inGB),  backgroundColor: 'rgba(52,211,153,0.7)', borderColor: '#34d399', borderWidth: 1, borderRadius: 3 },
+          { label: 'Outbound (GB)', data: dates.map(d => d.outGB), backgroundColor: 'rgba(248,113,113,0.7)', borderColor: '#f87171', borderWidth: 1, borderRadius: 3 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { labels: { color: '#94a3b8', boxWidth: 12, font: { size: 12 } } },
+          tooltip: {
+            backgroundColor: '#1e2130', borderColor: '#2d3348', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#94a3b8',
+            callbacks: { label: c => ` ${c.dataset.label}: ${c.parsed.y.toFixed(4).replace(/\.?0+$/,'')} GB` }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#64748b', maxRotation: 45, font: { size: 11 } }, grid: { color: '#1e2130' } },
+          y: { ticks: { color: '#64748b', font: { size: 11 }, callback: v => v + ' GB' }, grid: { color: '#2d3348' }, beginAtZero: true }
+        }
+      }
+    });
+  }
+
+  // ── Meter section renderer ──────────────────────────────────────────────────
+
+  function renderMeterSection(containerId, meters, meterInfo, sourceNote) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const inIds  = Object.keys(meterInfo).filter(id => meterInfo[id].dir === 'in');
+    const outIds = Object.keys(meterInfo).filter(id => meterInfo[id].dir === 'out');
+
+    let html = '';
+
+    const renderGroup = (ids, dirClass, dirLabel) => {
+      html += `<div class="meter-dir-header ${dirClass}">${escHtml(dirLabel)}</div>`;
+      for (const id of ids) {
+        const info = meterInfo[id];
+        const m    = meters[id];
+        const found = m?.found;
+        const val  = found ? formatGB(m.totalGB) : '—';
+        const valClass = found ? (info.dir === 'in' ? 'in' : 'out') : 'na';
+        const srcBadge = !found
+          ? '<span class="badge-na">N/A</span>'
+          : m.source === 'calculated'
+            ? '<span class="badge-calc">Calculated</span>'
+            : '<span class="badge-api">API</span>';
+        html += `
+          <div class="meter-row">
+            <span class="meter-id">${escHtml(id)}</span>
+            <span class="meter-desc">${escHtml(info.label)}</span>
+            <span class="meter-val ${valClass}">${escHtml(val)}</span>
+            <span>${srcBadge}</span>
+          </div>`;
+      }
+    };
+
+    renderGroup(inIds,  'dir-in',  '⬆ Inbound');
+    renderGroup(outIds, 'dir-out', '⬇ Outbound');
+
+    const hasCalc  = Object.values(meters).some(m => m?.source === 'calculated');
+    const hasNoApi = Object.values(meters).every(m => !m?.found);
+
+    if (hasNoApi) {
+      html += `<div class="meter-note">No meter-level data was returned by the Billing API for this period. The API endpoint may not expose per-meter aggregates without an ip=true filter, or no traffic was recorded for these meter IDs.</div>`;
+    } else if (hasCalc) {
+      html += `<div class="meter-note"><strong style="color:#a3e635">Calculated</strong> — derived from per-IP traffic totals using standard IONOS billing tier thresholds (0–2 TB / 2–10 TB / 10–50 TB). Values should closely match billing but may differ from the official API meter totals.</div>`;
+    }
+    if (sourceNote) {
+      html += `<div class="meter-note">${sourceNote}</div>`;
+    }
+
+    container.innerHTML = html;
+  }
+
+  // ── IP Mode ─────────────────────────────────────────────────────────────────
+
+  let allBrowseIPs = [];
+
+  function renderIpBrowserRows(ips) {
+    const tbody = document.getElementById('ip-browser-tbody');
+    if (!ips.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="no-data" style="padding:0.75rem 1rem">No IPs match the filter.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = ips.map(e => {
+      const bdg = DEVICE_BADGE[e.deviceType] || 'badge-unk';
+      const res = e.resourceName ? `<span style="display:block;font-size:0.72rem;color:#64748b;margin-top:0.15rem">${escHtml(e.resourceName)}</span>` : '';
+      return `<tr>
+        <td style="font-family:'Courier New',monospace;color:#94a3b8">${escHtml(e.ip)}</td>
+        <td style="color:#cbd5e1">${escHtml(e.vdcName)}</td>
+        <td style="color:#64748b">${escHtml(e.location)}</td>
+        <td><span class="badge-sm ${bdg}">${escHtml(e.deviceType)}</span>${res}</td>
+        <td><button class="ip-pick-btn" data-ip="${escHtml(e.ip)}">Select</button></td>
+      </tr>`;
+    }).join('');
+    tbody.querySelectorAll('.ip-pick-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.getElementById('targetIp').value = btn.dataset.ip;
+        document.getElementById('ip-browser').style.display = 'none';
+      });
+    });
+  }
+
+  document.getElementById('ip-browser-search').addEventListener('input', function () {
+    const q = this.value.toLowerCase();
+    renderIpBrowserRows(allBrowseIPs.filter(e =>
+      e.ip.includes(q) || e.vdcName.toLowerCase().includes(q) ||
+      e.location.toLowerCase().includes(q) || e.deviceType.toLowerCase().includes(q) ||
+      e.resourceName.toLowerCase().includes(q)
+    ));
+  });
+
+  document.getElementById('browse-ip-btn').addEventListener('click', async () => {
+    const token = document.getElementById('token').value.trim();
+    if (!token) { alert('Enter your Bearer Token first.'); return; }
+    const btn     = document.getElementById('browse-ip-btn');
+    const spinner = document.getElementById('browse-ip-spinner');
+    const browser = document.getElementById('ip-browser');
+    if (browser.style.display === 'block') { browser.style.display = 'none'; return; }
+    if (allBrowseIPs.length) { renderIpBrowserRows(allBrowseIPs); browser.style.display = 'block'; return; }
+    btn.disabled = true; spinner.style.display = 'inline-block';
+    try {
+      const r = await fetch('/api/list-ips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || `Error ${r.status}`); return; }
+      allBrowseIPs = d.ips || [];
+      document.getElementById('ip-browser-search').value = '';
+      renderIpBrowserRows(allBrowseIPs);
+      browser.style.display = 'block';
+    } catch (err) { alert('Network error: ' + err.message); }
+    finally { btn.disabled = false; spinner.style.display = 'none'; }
+  });
+
+  function renderIpSummary(summary, marketKey, ratePerGB) {
+    const market    = MARKETS[marketKey] || MARKETS.EU;
+    const FREE_GB   = 2048;
+    const billable  = Math.max(0, summary.totalOutGB - FREE_GB);
+    const cost      = billable * ratePerGB;
+    const costFmt   = market.symbol + cost.toFixed(2) + ' ' + market.currency;
+    const costNote  = summary.totalOutGB <= FREE_GB
+      ? '(within free 2 TB allowance)'
+      : `(${billable.toFixed(2)} GB billable after 2 TB free)`;
+    const badgeCls  = DEVICE_BADGE[summary.deviceType] || 'badge-vdc';
+    const dKey      = summary.deviceType.includes('Load Balancer') ? summary.deviceType
+                    : summary.deviceType === 'NAT Gateway' ? 'NAT Gateway'
+                    : summary.deviceType === 'Kubernetes Node' ? 'Kubernetes Node' : 'VDC';
+
+    const dns = (summary.aRecords?.length)
+      ? summary.aRecords.map(h => `<div class="stat-value" style="font-size:0.82rem;font-family:'Courier New',monospace;color:#94a3b8;margin-bottom:0.2rem">${escHtml(h)}</div>`).join('')
+      : summary.fqdn
+        ? `<div class="stat-value" style="font-size:0.82rem;font-family:'Courier New',monospace;color:#94a3b8">${escHtml(summary.fqdn)}</div><div class="rate-note">PTR only — no A-records found</div>`
+        : `<div class="rate-note" style="margin-top:0.2rem;font-style:italic">No PTR or A-records found</div>`;
+
+    document.getElementById('ip-summary-grid').innerHTML = `
+      <div class="stat-card"><div class="stat-label">IP Address</div><div class="stat-value hi-ip">${escHtml(summary.ip)}</div></div>
+      <div class="stat-card"><div class="stat-label">DNS / Hostnames</div>${dns}</div>
+      <div class="stat-card"><div class="stat-label">Device Type</div><div class="stat-value"><span class="badge ${badgeCls}">${escHtml(summary.deviceType)}</span></div></div>
+      <div class="stat-card"><div class="stat-label">${escHtml(dKey)} Name</div><div class="stat-value" style="font-size:1rem">${escHtml(summary.deviceName || '—')}</div></div>
+      <div class="stat-card"><div class="stat-label">${escHtml(dKey)} UUID</div><div class="stat-value uuid-val">${escHtml(summary.deviceUUID || '—')}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Inbound</div><div class="stat-value hi-in">${formatGB(summary.totalInGB)}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Outbound</div><div class="stat-value hi-out">${formatGB(summary.totalOutGB)}</div></div>
+      <div class="stat-card"><div class="stat-label">Est. Cost (${escHtml(market.currency)} @ ${escHtml(market.symbol)}${ratePerGB}/GB)</div><div class="stat-value hi-cost">${escHtml(costFmt)}</div><div class="rate-note">${escHtml(costNote)}</div></div>`;
+  }
+
+  function renderDailyTable(dates) {
+    const tbody  = document.getElementById('ip-daily-tbody');
+    if (!dates.length) { tbody.innerHTML = '<tr><td colspan="5" class="no-data">No daily records.</td></tr>'; return; }
+    const maxIn  = Math.max(...dates.map(d => d.inGB),  0.00001);
+    const maxOut = Math.max(...dates.map(d => d.outGB), 0.00001);
+    tbody.innerHTML = dates.map(d => `
+      <tr>
+        <td>${escHtml(d.date)}</td>
+        <td class="in">${formatGB(d.inGB)}</td>
+        <td class="bar-cell"><div class="bar-track"><div class="bar-fill-in" style="width:${(d.inGB/maxIn*100).toFixed(1)}%"></div></div></td>
+        <td class="out">${formatGB(d.outGB)}</td>
+        <td class="bar-cell"><div class="bar-track"><div class="bar-fill-out" style="width:${(d.outGB/maxOut*100).toFixed(1)}%"></div></div></td>
+      </tr>`).join('');
+  }
+
+  // ── VDC Mode ────────────────────────────────────────────────────────────────
+
+  // Clear the hidden UUID whenever the user types manually
+  document.getElementById('vdcQuery').addEventListener('input', () => {
+    document.getElementById('vdcQueryId').value = '';
+  });
+
+  // Helper: returns the value to send as vdcQuery in API calls (UUID if selected from browser, else typed text)
+  function getVdcQueryValue() {
+    return document.getElementById('vdcQueryId').value || document.getElementById('vdcQuery').value.trim();
+  }
+
+  document.getElementById('browse-vdc-btn').addEventListener('click', async () => {
+    const token = document.getElementById('token').value.trim();
+    if (!token) { alert('Enter your Bearer Token first.'); return; }
+    const btn     = document.getElementById('browse-vdc-btn');
+    const spinner = document.getElementById('browse-vdc-spinner');
+    const browser = document.getElementById('vdc-browser');
+    const tbody   = document.getElementById('vdc-browser-tbody');
+    if (browser.style.display === 'block') { browser.style.display = 'none'; return; }
+    btn.disabled = true; spinner.style.display = 'inline-block';
+    try {
+      const r = await fetch('/api/list-vdcs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || `Error ${r.status}`); return; }
+      if (!d.vdcs?.length) {
+        tbody.innerHTML = '<tr><td colspan="3" class="no-data">No VDCs found.</td></tr>';
+      } else {
+        const allRow = `<tr style="border-bottom:1px solid #334155">
+            <td style="color:#10b981;font-weight:600">All VDCs in Contract</td>
+            <td style="color:#64748b;font-size:0.82rem">—</td>
+            <td><button class="vdc-pick-btn" data-id="__ALL__" data-name="All VDCs in Contract">Select</button></td>
+          </tr>`;
+        tbody.innerHTML = allRow + d.vdcs.map(v => `
+          <tr>
+            <td>${escHtml(v.name)}</td>
+            <td style="color:#64748b;font-size:0.82rem">${escHtml(v.location)}</td>
+            <td><button class="vdc-pick-btn" data-id="${escHtml(v.id)}" data-name="${escHtml(v.name)}">Select</button></td>
+          </tr>`).join('');
+        tbody.querySelectorAll('.vdc-pick-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            document.getElementById('vdcQuery').value   = btn.dataset.name;
+            document.getElementById('vdcQueryId').value = btn.dataset.id;
+            browser.style.display = 'none';
+          });
+        });
+      }
+      browser.style.display = 'block';
+    } catch (err) { alert('Network error: ' + err.message); }
+    finally { btn.disabled = false; spinner.style.display = 'none'; }
+  });
+
+  function renderVdcSummary(summary, marketKey, ratePerGB) {
+    const market   = MARKETS[marketKey] || MARKETS.EU;
+    const FREE_GB  = 2048;
+    const billable = Math.max(0, summary.totalOutGB - FREE_GB);
+    const cost     = billable * ratePerGB;
+    const costFmt  = market.symbol + cost.toFixed(2) + ' ' + market.currency;
+    const costNote = summary.totalOutGB <= FREE_GB
+      ? `${summary.ipCount} IP(s) · within free 2 TB allowance`
+      : `${summary.ipCount} IP(s) · ${billable.toFixed(2)} GB billable after 2 TB free`;
+
+    document.getElementById('vdc-summary-grid').innerHTML = `
+      <div class="stat-card"><div class="stat-label">VDC Name</div><div class="stat-value" style="font-size:1rem">${escHtml(summary.vdcName)}</div></div>
+      <div class="stat-card"><div class="stat-label">VDC UUID</div><div class="stat-value uuid-val">${escHtml(summary.vdcUUID)}</div></div>
+      <div class="stat-card"><div class="stat-label">IPs with Traffic</div><div class="stat-value hi-ip">${escHtml(String(summary.ipCount))}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Inbound</div><div class="stat-value hi-in">${formatGB(summary.totalInGB)}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Outbound</div><div class="stat-value hi-out">${formatGB(summary.totalOutGB)}</div></div>
+      <div class="stat-card"><div class="stat-label">Est. Cost (${escHtml(market.currency)} @ ${escHtml(market.symbol)}${ratePerGB}/GB)</div><div class="stat-value hi-cost">${escHtml(costFmt)}</div><div class="rate-note">${escHtml(costNote)}</div></div>`;
+  }
+
+  function renderVdcIpTable(ips, totalOutGB) {
+    const tbody = document.getElementById('vdc-ip-tbody');
+    if (!ips.length) { tbody.innerHTML = '<tr><td colspan="7" class="no-data">No IP records.</td></tr>'; return; }
+    tbody.innerHTML = ips.map(ip => {
+      const pct    = totalOutGB > 0 ? (ip.totalOutGB / totalOutGB * 100) : 0;
+      const bdgCls = DEVICE_BADGE[ip.deviceType] || 'badge-unk';
+      const res    = ip.resourceName ? `<span class="resource-name">${escHtml(ip.resourceName)}</span>` : '';
+      const nic    = ip.nicName
+        ? `<span class="ip-mono" style="font-size:0.78rem;color:#94a3b8">${escHtml(ip.nicName)}</span>`
+        : `<span style="color:#475569;font-size:0.78rem">—</span>`;
+      const lan    = ip.lan != null
+        ? `<span style="font-size:0.82rem;color:#94a3b8">LAN ${escHtml(String(ip.lan))}</span>`
+        : `<span style="color:#475569;font-size:0.78rem">—</span>`;
+      return `<tr>
+        <td class="ip-mono">${escHtml(ip.ip)}</td>
+        <td><span class="badge-sm ${bdgCls}">${escHtml(ip.deviceType)}</span>${res}</td>
+        <td>${nic}</td>
+        <td>${lan}</td>
+        <td class="in">${formatGB(ip.totalInGB)}</td>
+        <td class="out">${formatGB(ip.totalOutGB)}</td>
+        <td class="bar-cell">
+          <div class="bar-track"><div class="bar-fill-out" style="width:${pct.toFixed(1)}%"></div></div>
+          <span class="pct-label">${pct.toFixed(1)}%</span>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── S3 Mode ─────────────────────────────────────────────────────────────────
+
+  function renderS3Summary(totals) {
+    document.getElementById('s3-summary-grid').innerHTML = `
+      <div class="stat-card"><div class="stat-label">Total S3 Inbound</div><div class="stat-value hi-in">${formatGB(totals.inGB)}</div><div class="rate-note">S3TI2100 + S3TI2200</div></div>
+      <div class="stat-card"><div class="stat-label">Total S3 Outbound</div><div class="stat-value hi-out">${formatGB(totals.outGB)}</div><div class="rate-note">S3TO2100 + S3TO2200 + S3TO2300</div></div>`;
+  }
+
+  // ── Form submit ─────────────────────────────────────────────────────────────
+
+  document.getElementById('query-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    hideError();
+    hideAllResults();
+    setLoading(true);
+
+    const mode        = currentMode();
+    const token       = document.getElementById('token').value.trim();
+    const contractId  = document.getElementById('contractId').value.trim();
+    const period      = document.getElementById('period-year').value + '-' + document.getElementById('period-month').value;
+    const marketKey   = document.getElementById('market').value;
+    const ratePerGB   = parseFloat(document.getElementById('rate').value) || 0;
+    const rangeMonths = parseInt(document.getElementById('period-range').value, 10);
+
+    try {
+      if (rangeMonths > 1) {
+        const targetIp = document.getElementById('targetIp').value.trim();
+        const vdcQuery = getVdcQueryValue();
+        if (mode === 'ip'  && !targetIp) { showError('Enter an IP address to query range data.'); return; }
+        if (mode === 'vdc' && !vdcQuery) { showError('Enter a VDC name to query range data.'); return; }
+        const r = await fetch('/api/query-range', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, contractId, endPeriod: period, months: rangeMonths, mode, targetIp, vdcQuery })
+        });
+        const d = await r.json();
+        if (!r.ok) { showError(d.error || `Error ${r.status}`); return; }
+        renderRangeResults(d, mode, marketKey, ratePerGB);
+
+        // Show the projection card for ip/vdc range queries using the end period
+        if (mode === 'ip' || mode === 'vdc') {
+          lastQueryParams = { token, contractId, currentPeriod: period, targetIp, vdcQuery };
+          document.getElementById(`${mode}-proj-result`).innerHTML = '';
+          placeAndShowProjCard(mode, 'range-chart');
+        }
+
+      } else if (mode === 'ip') {
+        const targetIp = document.getElementById('targetIp').value.trim();
+        const r = await fetch('/api/query-ip', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, contractId, period, targetIp })
+        });
+        const d = await r.json();
+        if (!r.ok) { showError(d.error || `Error ${r.status}`); return; }
+
+        renderIpSummary(d.summary, marketKey, ratePerGB);
+        ipChart = buildChart('ip-chart', ipChart, d.dates);
+        renderDailyTable(d.dates);
+        lastQueryParams = { token, contractId, currentPeriod: period, targetIp, vdcQuery: '' };
+        document.getElementById('ip-proj-result').innerHTML = '';
+        document.getElementById('ip-results').style.display = '';
+        placeAndShowProjCard('ip', 'ip-chart');
+        document.getElementById('ip-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      } else if (mode === 'vdc') {
+        const vdcQuery = getVdcQueryValue();
+        const r = await fetch('/api/query-vdc', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, contractId, period, vdcQuery })
+        });
+        const d = await r.json();
+        if (!r.ok) { showError(d.error || `Error ${r.status}`); return; }
+
+        renderVdcSummary(d.summary, marketKey, ratePerGB);
+        vdcChart = buildChart('vdc-chart', vdcChart, d.dates);
+        renderVdcIpTable(d.ips, d.summary.totalOutGB);
+        flIpDeviceMap = new Map((d.ips || []).map(ip => [ip.ip, { label: ip.resourceName || ip.ip, type: ip.type || 'Server' }]));
+        lastQueryParams = { token, contractId, currentPeriod: period, targetIp: '', vdcQuery };
+        document.getElementById('vdc-proj-result').innerHTML = '';
+        placeAndShowProjCard('vdc', 'vdc-chart');
+
+        // Traffic meter section
+        renderMeterSection('traffic-meter-section', d.trafficMeters, TRAFFIC_METER_INFO);
+
+        // S3 meter section (same contract)
+        document.getElementById('vdc-s3-contract-id').textContent = contractId;
+        renderMeterSection('vdc-s3-meter-section', d.s3Meters, S3_METER_INFO,
+          'd.s3Meters — fetched from the same billing period at contract level. S3 traffic is not VDC-scoped.');
+
+        document.getElementById('vdc-results').style.display = '';
+        document.getElementById('vdc-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        showFlowLogsCard(vdcQuery, token, document.getElementById('vdcQuery').value.trim());
+
+      } else if (mode === 's3') {
+        const r = await fetch('/api/query-s3', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, contractId, period })
+        });
+        const d = await r.json();
+        if (!r.ok) { showError(d.error || `Error ${r.status}`); return; }
+
+        document.getElementById('s3-contract-id-label').textContent = contractId;
+        renderS3Summary(d.totals);
+        lastQueryParams = { token, contractId, currentPeriod: period, targetIp: '', vdcQuery: '' };
+        document.getElementById('s3-proj-result').innerHTML = '';
+        renderMeterSection('s3-meter-section', d.s3Meters, S3_METER_INFO);
+        renderMeterSection('s3-traffic-meter-section', d.trafficMeters, TRAFFIC_METER_INFO);
+
+        // Show meter IDs discovered in the API response
+        if (d.allMeterIds?.length) {
+          const box = document.getElementById('s3-traffic-meter-section');
+          const discovered = d.allMeterIds.filter(id => !Object.keys(TRAFFIC_METER_INFO).includes(id) && !Object.keys(S3_METER_INFO).includes(id));
+          if (discovered.length) {
+            box.insertAdjacentHTML('beforeend', `<div class="meter-note">Additional meter IDs returned by API (not in defined list): <code style="color:#7dd3fc">${discovered.join(', ')}</code></div>`);
+          }
+        }
+
+        document.getElementById('s3-results').style.display = '';
+        document.getElementById('s3-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    } catch (err) {
+      showError('Network error: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  // ── Projection click handlers ────────────────────────────────────────────────
+  document.getElementById('ip-proj-btn').addEventListener('click',  () => runProjection('ip'));
+  document.getElementById('vdc-proj-btn').addEventListener('click', () => runProjection('vdc'));
+  document.getElementById('s3-proj-btn').addEventListener('click',  () => runProjection('s3'));
+
+  // Apply initial mode
+  applyMode('ip');
+
+  // ── Flow Logs ────────────────────────────────────────────────────────────────
+
+  let flS3Creds   = {};   // {s3AccessKey, s3SecretKey, bucketName, s3Endpoint, s3Region}
+  let flFlowData  = [];   // last loaded flow records (for heatmap)
+  let flGraphAnim = null; // animation frame handle
+  let flIpDeviceMap = new Map(); // ip → {label, type} from VDC query
+
+  // Tab switching
+  document.querySelectorAll('.fl-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.fl-tab').forEach(b => b.classList.remove('fl-active'));
+      document.querySelectorAll('.fl-panel').forEach(p => p.classList.remove('fl-visible'));
+      btn.classList.add('fl-active');
+      document.getElementById(btn.dataset.tab).classList.add('fl-visible');
+      if (btn.dataset.tab === 'fl-heatmap' && flFlowData.length) renderHeatMap(flFlowData);
+    });
+  });
+
+  // Show the card and pre-fill detected region from VDC datacenter
+  let flCurrentVdc = '';
+
+  // Pre-fill credentials from .env on page load (with optional password protection)
+  function applyEnvConfig(cfg) {
+    if (cfg.ionosApiToken)  document.getElementById('token').value        = cfg.ionosApiToken;
+    if (cfg.contractId)     document.getElementById('contractId').value   = cfg.contractId;
+    if (cfg.s3AccessKey)    document.getElementById('fl-s3-key').value    = cfg.s3AccessKey;
+    if (cfg.s3SecretKey)    document.getElementById('fl-s3-secret').value = cfg.s3SecretKey;
+    if (cfg.s3AccessKey)    flS3Creds.s3AccessKey = cfg.s3AccessKey;
+    if (cfg.s3SecretKey)    flS3Creds.s3SecretKey = cfg.s3SecretKey;
+    if (cfg.ionosApiToken || cfg.s3AccessKey || cfg.contractId)
+      document.getElementById('env-loaded-banner').style.display = '';
+  }
+
+  // Client-side .env file upload — parsed entirely in the browser, never sent to server
+  document.getElementById('env-file-upload').addEventListener('change', function () {
+    const file = this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const cfg = {};
+      for (const line of e.target.result.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq < 1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        const val = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+        if (key === 'IONOS_API_TOKEN')    cfg.ionosApiToken = val;
+        if (key === 'IONOS_CONTRACT_ID')  cfg.contractId    = val;
+        if (key === 'IONOS_S3_ACCESS_KEY') cfg.s3AccessKey  = val;
+        if (key === 'IONOS_S3_SECRET_KEY') cfg.s3SecretKey  = val;
+      }
+      applyEnvConfig(cfg);
+      this.value = '';  // reset so same file can be re-loaded
+    };
+    reader.readAsText(file);
+  });
+
+  async function fetchEnvConfig(password) {
+    const headers = password
+      ? { 'Authorization': 'Basic ' + btoa((window._envContractId || '') + ':' + password) }
+      : {};
+    const r = await fetch('/api/env-config', { headers });
+    if (r.status === 401) {
+      const d = await r.json().catch(() => ({}));
+      return { status: 401, contractId: d.contractId || '' };
+    }
+    if (!r.ok) return { status: r.status };
+    return { status: 200, cfg: await r.json() };
+  }
+
+  (async () => {
+    try {
+      const result = await fetchEnvConfig(null);
+      if (result.status === 200) {
+        applyEnvConfig(result.cfg);
+      } else if (result.status === 401) {
+        // Protected — show password modal
+        window._envContractId = result.contractId;
+        document.getElementById('env-auth-username').textContent =
+          result.contractId ? `Contract ID: ${result.contractId}` : 'Enter password';
+        document.getElementById('env-auth-modal').style.display = 'flex';
+      }
+    } catch (_) {}
+  })();
+
+  document.getElementById('env-auth-submit').addEventListener('click', async () => {
+    const pw     = document.getElementById('env-auth-password').value;
+    const err    = document.getElementById('env-auth-error');
+    const submit = document.getElementById('env-auth-submit');
+    const skip   = document.getElementById('env-auth-skip');
+    err.style.display = 'none';
+    submit.disabled = true;
+    skip.disabled   = false;
+    try {
+      const result = await fetchEnvConfig(pw).catch(() => ({ status: 0 }));
+      if (result.status === 200) {
+        document.getElementById('env-auth-modal').style.display = 'none';
+        applyEnvConfig(result.cfg);
+      } else {
+        err.style.display = '';
+        document.getElementById('env-auth-password').select();
+      }
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  document.getElementById('env-auth-password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('env-auth-submit').click();
+  });
+
+  document.getElementById('env-auth-skip').addEventListener('click', () => {
+    document.getElementById('env-auth-modal').style.display = 'none';
+  });
+
+  async function showFlowLogsCard(vdcQuery, token, vdcDisplayName) {
+    const vdcChanged = vdcQuery !== flCurrentVdc;
+    flCurrentVdc = vdcQuery;
+
+    const card = document.getElementById('vdc-flowlogs-card');
+    card.style.display = '';
+
+    if (vdcChanged) {
+      // Reset stale data from previous VDC
+      flFlowData  = [];
+      flIpDeviceMap.clear();
+      flS3Creds   = {};
+      if (flGraphAnim) { cancelAnimationFrame(flGraphAnim); flGraphAnim = null; }
+
+      // Switch back to Setup tab
+      document.querySelectorAll('#vdc-flowlogs-card .fl-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('#vdc-flowlogs-card .fl-panel').forEach(p => p.classList.remove('fl-visible'));
+      const setupTab = document.querySelector('#vdc-flowlogs-card .fl-tab[data-tab="fl-setup"]');
+      if (setupTab) setupTab.classList.add('active');
+      const setupPanel = document.getElementById('fl-setup');
+      if (setupPanel) setupPanel.classList.add('fl-visible');
+
+      // Clear results from other tabs
+      document.getElementById('fl-activate-results').innerHTML = '';
+      document.getElementById('fl-status-results').innerHTML = '';
+      document.getElementById('fl-report-meta').textContent = '';
+      document.getElementById('fl-report-tbody').innerHTML =
+        '<tr><td colspan="9" class="no-data">Load logs to see data.</td></tr>';
+      document.getElementById('fl-heatmap-empty').style.display = '';
+      document.getElementById('fl-heatmap-content').style.display = 'none';
+    }
+
+    // Always update bucket suggestion and S3 region for the new VDC
+    const safeName = (vdcDisplayName || vdcQuery).toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').slice(0, 28);
+    document.getElementById('fl-bucket').value = `ionos-fl-${safeName}`;
+
+    try {
+      const regions = await fetch('/api/flowlogs/s3-regions').then(r => r.json());
+      const dcData  = await fetch('https://api.ionos.com/cloudapi/v6/datacenters?depth=1',
+        { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+      const q = vdcQuery.trim().toLowerCase();
+      const dc = (dcData.items || []).find(d =>
+        d.id?.toLowerCase() === q || d.properties?.name?.toLowerCase().includes(q));
+      if (dc) {
+        const loc    = dc.properties?.location || '';
+        const s3Info = regions.find(r => r.loc === loc) || regions[0];
+        if (s3Info) {
+          document.getElementById('fl-s3-region-display').value = `${s3Info.region} — ${s3Info.label}`;
+          document.getElementById('fl-dc-info').innerHTML =
+            `Datacenter: <strong>${escHtml(dc.properties?.name)}</strong> &nbsp;|&nbsp; ` +
+            `Location: <strong>${escHtml(loc)}</strong> &nbsp;|&nbsp; ` +
+            `Nearest S3: <strong>${escHtml(s3Info.endpoint)}</strong>`;
+          flS3Creds.s3Endpoint = s3Info.endpoint;
+          flS3Creds.s3Region   = s3Info.region;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Activate flow logs
+  document.getElementById('fl-activate-btn').addEventListener('click', async () => {
+    const token      = document.getElementById('token').value.trim();
+    const vdcQuery   = getVdcQueryValue();
+    const s3Key      = document.getElementById('fl-s3-key').value.trim();
+    const s3Secret   = document.getElementById('fl-s3-secret').value.trim();
+    const bucketName = document.getElementById('fl-bucket').value.trim();
+    if (!s3Key || !s3Secret || !bucketName) { alert('Enter S3 access key, secret key and bucket name.'); return; }
+
+    flS3Creds = { ...flS3Creds, s3AccessKey: s3Key, s3SecretKey: s3Secret, bucketName };
+
+    const btn = document.getElementById('fl-activate-btn');
+    const lbl = document.getElementById('fl-activate-label');
+    const spn = document.getElementById('fl-activate-spinner');
+    btn.disabled = true; lbl.textContent = 'Activating…'; spn.style.display = 'inline-block';
+
+    const retentionDays = parseInt(document.getElementById('fl-retention').value) || 0;
+
+    try {
+      const r = await fetch('/api/flowlogs/setup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, vdcQuery, s3AccessKey: s3Key, s3SecretKey: s3Secret,
+          bucketName, s3Region: flS3Creds.s3Region, s3Endpoint: flS3Creds.s3Endpoint, retentionDays })
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || `Error ${r.status}`); return; }
+
+      flS3Creds.s3Endpoint = d.s3Endpoint;
+      flS3Creds.s3Region   = d.s3Region;
+
+      const ul = document.getElementById('fl-activate-results');
+      const retentionLabel = d.lifecycleSet
+        ? `&nbsp;|&nbsp; Retention: <strong style="color:#6ee7b7">auto-delete after ${d.lifecycleDays} days</strong>`
+        : (retentionDays === 0 ? '&nbsp;|&nbsp; Retention: <span style="color:#64748b">keep forever</span>' : '&nbsp;|&nbsp; <span style="color:#f87171">Lifecycle policy failed</span>');
+      let html = `<div style="margin-bottom:0.75rem;font-size:0.82rem;color:#94a3b8">
+        Bucket <strong style="color:#7dd3fc">${escHtml(d.bucketName)}</strong>
+        ${d.bucketCreated ? '— created' : '— already existed'} &nbsp;|&nbsp;
+        S3: <strong style="color:#7dd3fc">${escHtml(d.s3Endpoint)}</strong>${retentionLabel}</div>`;
+      for (const a of d.activated) {
+        const icon = a.status === 'activated' ? '✅' : a.status === 'updated' ? '🔄' : '⏭️';
+        const cls  = a.status === 'activated' ? 'fl-ok' : a.status === 'updated' ? 'fl-skip' : 'fl-skip';
+        html += `<div class="fl-result-row"><span>${icon}</span>
+          <span class="${cls}">${escHtml(a.type)}</span>
+          <span style="color:#cbd5e1">${escHtml(a.name)}</span>
+          <span style="color:#64748b;font-size:0.75rem">${a.status === 'activated' ? 'activated' : a.status === 'updated' ? 'updated → BIDIRECTIONAL/ALL' : 'already active'}</span></div>`;
+      }
+      for (const s of (d.skipped || [])) {
+        html += `<div class="fl-result-row"><span>⛔</span>
+          <span class="fl-skip">${escHtml(s.type)}</span>
+          <span style="color:#64748b">${escHtml(s.name)}</span>
+          <span style="color:#64748b;font-size:0.75rem">managed resource — flow logs not supported</span></div>`;
+      }
+      for (const e of d.errors) {
+        html += `<div class="fl-result-row"><span>❌</span>
+          <span class="fl-err">${escHtml(e.type)}</span>
+          <span style="color:#cbd5e1">${escHtml(e.name)}</span>
+          <span class="fl-err">${escHtml(e.error)}</span></div>`;
+      }
+      ul.innerHTML = html;
+    } catch (err) {
+      alert('Network error: ' + err.message);
+    } finally {
+      btn.disabled = false; lbl.textContent = 'Activate Flow Logs'; spn.style.display = '';
+    }
+  });
+
+  // Check status
+  document.getElementById('fl-status-btn').addEventListener('click', async () => {
+    const token    = document.getElementById('token').value.trim();
+    const vdcQuery = getVdcQueryValue();
+    const s3Key    = document.getElementById('fl-s3-key').value.trim()    || flS3Creds.s3AccessKey;
+    const s3Secret = document.getElementById('fl-s3-secret').value.trim() || flS3Creds.s3SecretKey;
+    const bucket   = document.getElementById('fl-bucket').value.trim()    || flS3Creds.bucketName;
+    const btn = document.getElementById('fl-status-btn');
+    const spn = document.getElementById('fl-status-spinner');
+    btn.disabled = true; spn.style.display = 'inline-block';
+    try {
+      const r = await fetch('/api/flowlogs/status', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, vdcQuery,
+          s3AccessKey: s3Key, s3SecretKey: s3Secret, bucketName: bucket,
+          s3Endpoint: flS3Creds.s3Endpoint, s3Region: flS3Creds.s3Region })
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || `Error ${r.status}`); return; }
+
+      const retentionStr = d.retentionDays === null  ? '' :
+                           d.retentionDays === 0     ? '<span style="color:#64748b">Retention: keep forever</span>' :
+                           `<span style="color:#6ee7b7">Retention: auto-delete after <strong>${d.retentionDays} days</strong></span>`;
+      const bucketStr = d.bucketName
+        ? `<span style="color:#94a3b8;font-size:0.8rem">Bucket: <strong style="color:#7dd3fc">${escHtml(d.bucketName)}</strong></span>`
+        : '';
+      const headerHtml = (bucketStr || retentionStr)
+        ? `<div style="display:flex;gap:1.5rem;margin-bottom:0.75rem;font-size:0.82rem;flex-wrap:wrap">${bucketStr}${retentionStr}</div>`
+        : '';
+
+      let html = headerHtml + `<table class="fl-status-tbl"><thead><tr>
+        <th>Type</th><th>Resource</th><th>Flow Log</th><th>Bucket</th><th>Direction</th><th>Action</th><th>State</th>
+      </tr></thead><tbody>`;
+      for (const res of d.resources) {
+        if (res.hasFlowLog) {
+          for (const fl of res.flowLogs) {
+            html += `<tr>
+              <td><span class="badge-sm ${DEVICE_BADGE[res.type] || 'badge-unk'}">${escHtml(res.type)}</span></td>
+              <td style="color:#cbd5e1">${escHtml(res.name)}</td>
+              <td><span class="fl-dot-on"></span><span style="color:#4ade80;font-size:0.78rem">${escHtml(fl.name||'')}</span></td>
+              <td style="color:#7dd3fc;font-size:0.78rem">${escHtml(fl.bucket||'—')}</td>
+              <td style="color:#94a3b8">${escHtml(fl.direction||'—')}</td>
+              <td style="color:#94a3b8">${escHtml(fl.action||'—')}</td>
+              <td style="color:#94a3b8">${escHtml(fl.state||'—')}</td>
+            </tr>`;
+          }
+        } else if (res.restricted) {
+          html += `<tr>
+            <td><span class="badge-sm ${DEVICE_BADGE[res.type] || 'badge-unk'}">${escHtml(res.type)}</span></td>
+            <td style="color:#64748b">${escHtml(res.name)}</td>
+            <td colspan="5"><span class="fl-dot-off"></span><span style="color:#64748b;font-size:0.78rem">managed resource — not accessible</span></td>
+          </tr>`;
+        } else {
+          html += `<tr>
+            <td><span class="badge-sm ${DEVICE_BADGE[res.type] || 'badge-unk'}">${escHtml(res.type)}</span></td>
+            <td style="color:#64748b">${escHtml(res.name)}</td>
+            <td colspan="5"><span class="fl-dot-off"></span><span style="color:#475569;font-size:0.78rem">Not configured</span></td>
+          </tr>`;
+        }
+      }
+      html += '</tbody></table>';
+      document.getElementById('fl-status-results').innerHTML = html;
+    } catch (err) {
+      alert('Network error: ' + err.message);
+    } finally {
+      btn.disabled = false; spn.style.display = '';
+    }
+  });
+
+  const fmtBytes = b => b > 1073741824 ? (b/1073741824).toFixed(2)+' GB'
+                      : b > 1048576    ? (b/1048576).toFixed(2)+' MB'
+                      : b > 1024       ? (b/1024).toFixed(1)+' KB'
+                      : b+' B';
+  const fmtTime = ts => {
+    if (!ts) return '—';
+    const dt = new Date(ts * 1000);
+    return dt.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  };
+
+  function renderReportTable() {
+    const q = document.getElementById('fl-ip-filter').value.trim().toLowerCase();
+    const filtered = q
+      ? flFlowData.filter(f => f.src.toLowerCase().includes(q) || f.dst.toLowerCase().includes(q))
+      : flFlowData;
+
+    document.getElementById('fl-ip-clear').style.display = q ? '' : 'none';
+    document.getElementById('fl-ip-filter-count').textContent =
+      q ? `${filtered.length} of ${flFlowData.length} flows` : '';
+
+    document.getElementById('fl-report-tbody').innerHTML = filtered.map(f => `<tr>
+      <td style="color:#94a3b8;font-size:0.78rem;white-space:nowrap">${fmtTime(f.firstSeen)}</td>
+      <td style="color:${f.src.toLowerCase().includes(q) && q ? '#7dd3fc' : ''}">${escHtml(f.src)}</td>
+      <td style="color:${f.dst.toLowerCase().includes(q) && q ? '#7dd3fc' : ''}">${escHtml(f.dst)}</td>
+      <td>${escHtml(f.proto)}</td>
+      <td>${escHtml(f.dport)}</td>
+      <td>${f.packets.toLocaleString()}</td>
+      <td>${fmtBytes(f.bytes)}</td>
+      <td>${f.count.toLocaleString()}</td>
+      <td style="color:${f.action==='REJECT'?'#f87171':'#4ade80'}">${escHtml(f.action||'—')}</td>
+    </tr>`).join('') || `<tr><td colspan="9" class="no-data">No flows match "${escHtml(q)}".</td></tr>`;
+  }
+
+  document.getElementById('fl-ip-filter').addEventListener('input', renderReportTable);
+  document.getElementById('fl-ip-clear').addEventListener('click', () => {
+    document.getElementById('fl-ip-filter').value = '';
+    renderReportTable();
+  });
+
+  // Load flow log report
+  document.getElementById('fl-report-btn').addEventListener('click', async () => {
+    const bucketName   = document.getElementById('fl-bucket').value.trim() || flS3Creds.bucketName;
+    const s3Key        = document.getElementById('fl-s3-key').value.trim()    || flS3Creds.s3AccessKey;
+    const s3Secret     = document.getElementById('fl-s3-secret').value.trim() || flS3Creds.s3SecretKey;
+    const maxFiles     = document.getElementById('fl-max-files').value;
+    const sinceSeconds = document.getElementById('fl-time-window').value;
+    const token        = document.getElementById('token').value.trim();
+    const vdcQuery     = document.getElementById('vdcQuery').value.trim();
+    if (!s3Key || !s3Secret || !bucketName) { alert('Enter S3 credentials and bucket name in the Setup tab first.'); return; }
+
+    const btn = document.getElementById('fl-report-btn');
+    const spn = document.getElementById('fl-report-spinner');
+    btn.disabled = true; spn.style.display = 'inline-block';
+    try {
+      const r = await fetch('/api/flowlogs/read', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ s3AccessKey: s3Key, s3SecretKey: s3Secret,
+          s3Endpoint: flS3Creds.s3Endpoint, s3Region: flS3Creds.s3Region,
+          bucketName, maxFiles, sinceSeconds, token, vdcQuery })
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || `Error ${r.status}`); return; }
+
+      // Merge returned ipMeta into the device map (server fetch wins over stale VDC query data)
+      if (d.ipMeta) {
+        for (const [ip, meta] of Object.entries(d.ipMeta))
+          flIpDeviceMap.set(ip, { label: meta.name || ip, type: meta.type || 'Server', resourceId: meta.resourceId || '' });
+      }
+
+      flFlowData = d.flows || [];
+      const windowLabel = document.getElementById('fl-time-window').selectedOptions[0].text;
+      const rangeStr = d.dataStart && d.dataEnd
+        ? ` · data ${new Date(d.dataStart*1000).toLocaleTimeString()} – ${new Date(d.dataEnd*1000).toLocaleTimeString()}`
+        : '';
+      document.getElementById('fl-report-meta').textContent =
+        `${d.filesRead} file(s) read · ${d.totalRecords.toLocaleString()} records · ${(d.filteredRecords ?? flFlowData.length).toLocaleString()} in window (${windowLabel}) · ${flFlowData.length} unique flows${rangeStr}`;
+
+      if (d.message) {
+        document.getElementById('fl-report-tbody').innerHTML =
+          `<tr><td colspan="9" class="no-data">${escHtml(d.message)}</td></tr>`;
+        return;
+      }
+
+      // Clear filter and populate IP autocomplete datalist
+      const allIPs = [...new Set(flFlowData.flatMap(f => [f.src, f.dst]))].sort();
+      const datalist = document.getElementById('fl-ip-datalist');
+      datalist.innerHTML = allIPs.map(ip => `<option value="${escHtml(ip)}">`).join('');
+      document.getElementById('fl-ip-filter').value = '';
+      document.getElementById('fl-ip-clear').style.display = 'none';
+      document.getElementById('fl-ip-filter-count').textContent = '';
+
+      renderReportTable();
+      document.getElementById('fl-heatmap-empty').style.display = 'none';
+      document.getElementById('fl-heatmap-content').style.display = '';
+    } catch (err) {
+      alert('Network error: ' + err.message);
+    } finally {
+      btn.disabled = false; spn.style.display = '';
+    }
+  });
+
+  // ── Heat Map rendering ───────────────────────────────────────────────────────
+
+  function renderHeatMap(flows) {
+    if (!flows.length) return;
+    renderMatrix(flows);
+    renderGraph(flows);
+  }
+
+  function logColor(ratio) {
+    // 0→dark blue, 0.33→cyan, 0.66→orange, 1→red
+    const stops = [[15,58,90],[14,165,233],[249,115,22],[239,68,68]];
+    const t = Math.max(0, Math.min(1, ratio)) * (stops.length - 1);
+    const i = Math.floor(t), f = t - i;
+    const a = stops[Math.min(i, stops.length-1)];
+    const b = stops[Math.min(i+1, stops.length-1)];
+    return `rgb(${Math.round(a[0]+(b[0]-a[0])*f)},${Math.round(a[1]+(b[1]-a[1])*f)},${Math.round(a[2]+(b[2]-a[2])*f)})`;
+  }
+
+  function renderMatrix(flows) {
+    const canvas = document.getElementById('fl-matrix-canvas');
+    const INET = 'Internet';
+
+    // Map each IP to a matrix label — external IPs collapse to "Internet"
+    const labelOf = ip => (isExternalIP(ip) && !flIpDeviceMap.has(ip)) ? INET : ip;
+
+    const labelSet = new Set();
+    for (const f of flows) { labelSet.add(labelOf(f.src)); labelSet.add(labelOf(f.dst)); }
+    // Put Internet last if present
+    const ips = [...labelSet].filter(l => l !== INET).slice(0, 29);
+    if (labelSet.has(INET)) ips.push(INET);
+
+    const idx = Object.fromEntries(ips.map((ip, i) => [ip, i]));
+    const n   = ips.length;
+    const matrix = Array.from({length: n}, () => new Float64Array(n));
+    for (const f of flows) {
+      const r = idx[labelOf(f.src)], c = idx[labelOf(f.dst)];
+      if (r !== undefined && c !== undefined && r !== c) matrix[r][c] += f.bytes;
+    }
+    const maxVal = Math.max(...ips.flatMap((_, r) => ips.map((__, c) => matrix[r][c])));
+    const logMax = Math.log1p(maxVal);
+
+    const LABEL = 130, CELL = 22;
+    const W = LABEL + n * CELL, H = LABEL + n * CELL;
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, W, H);
+
+    // Row labels
+    ctx.font = '11px monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ips.forEach((ip, i) => {
+      ctx.fillStyle = ip === INET ? '#6ee7b7' : '#94a3b8';
+      ctx.fillText(ip, LABEL - 6, LABEL + i * CELL + CELL / 2);
+    });
+    // Column labels (rotated)
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ips.forEach((ip, i) => {
+      ctx.save(); ctx.translate(LABEL + i * CELL + CELL / 2, LABEL - 6);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = ip === INET ? '#6ee7b7' : '#94a3b8';
+      ctx.fillText(ip, 0, 0); ctx.restore();
+    });
+
+    // Cells
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+      const v = matrix[r][c];
+      if (v > 0) {
+        // Internet cells get a green tint overlay on the colour gradient
+        ctx.fillStyle = logColor(Math.log1p(v) / logMax);
+        ctx.fillRect(LABEL + c * CELL, LABEL + r * CELL, CELL - 1, CELL - 1);
+        if (ips[r] === INET || ips[c] === INET) {
+          ctx.fillStyle = 'rgba(16,185,129,0.25)';
+          ctx.fillRect(LABEL + c * CELL, LABEL + r * CELL, CELL - 1, CELL - 1);
+        }
+      } else {
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(LABEL + c * CELL, LABEL + r * CELL, CELL - 1, CELL - 1);
+      }
+    }
+
+    // Tooltip on hover
+    canvas.onmousemove = e => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const ci = Math.floor((mx - LABEL) / CELL), ri = Math.floor((my - LABEL) / CELL);
+      if (ri >= 0 && ri < n && ci >= 0 && ci < n && matrix[ri][ci] > 0) {
+        const bytes = matrix[ri][ci];
+        const fmtB = bytes > 1e9 ? (bytes/1e9).toFixed(2)+' GB' : bytes > 1e6 ? (bytes/1e6).toFixed(2)+' MB' : (bytes/1e3).toFixed(1)+' KB';
+        canvas.title = `${ips[ri]} → ${ips[ci]}: ${fmtB}`;
+      } else canvas.title = '';
+    };
+  }
+
+  function isExternalIP(ip) {
+    const p = ip.split('.').map(Number);
+    if (p.length !== 4 || p.some(isNaN)) return false;
+    if (p[0] === 10) return false;
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return false;
+    if (p[0] === 192 && p[1] === 168) return false;
+    if (p[0] === 127 || p[0] === 0) return false;
+    return true;
+  }
+
+  function drawCloud(ctx, cx, cy, r, fill, stroke) {
+    // Simple cloud from overlapping circles
+    const bumps = [
+      [cx, cy, r], [cx - r*0.7, cy + r*0.2, r*0.65],
+      [cx + r*0.7, cy + r*0.2, r*0.65], [cx - r*0.35, cy - r*0.45, r*0.6],
+      [cx + r*0.35, cy - r*0.45, r*0.6]
+    ];
+    ctx.fillStyle = fill;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1.5;
+    for (const [bx, by, br] of bumps) {
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI*2);
+      ctx.fill();
+    }
+    for (const [bx, by, br] of bumps) {
+      ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI*2);
+      ctx.stroke();
+    }
+  }
+
+  function renderGraph(flows) {
+    const canvas = document.getElementById('fl-graph-canvas');
+    const W = Math.min(960, window.innerWidth - 60), H = 500;
+    canvas.width = W; canvas.height = H;
+
+    // Classify IPs: internal (in VDC device map or private range) vs external
+    const isInternalIP = ip => flIpDeviceMap.has(ip) || !isExternalIP(ip);
+
+    // Map IP → nodeKey: resources with a resourceId (ALB/NLB/NAT) share one node; servers use their IP
+    const ipToKey = ip => { const m = flIpDeviceMap.get(ip); return (m?.resourceId) ? m.resourceId : ip; };
+
+    // Aggregate bytes per nodeKey + Internet supernode
+    const nodeBytes  = new Map(); // nodeKey → bytes
+    let   inetBytes  = 0;
+    const inetEdges  = new Map(); // nodeKey → {toInet, fromInet}
+    const extIPs     = new Set();
+    const intEdgeMap = new Map(); // nodeKey|nodeKey → bytes (both internal)
+
+    for (const f of flows.slice(0, 300)) {
+      const srcExt = isExternalIP(f.src) && !flIpDeviceMap.has(f.src);
+      const dstExt = isExternalIP(f.dst) && !flIpDeviceMap.has(f.dst);
+
+      if (srcExt) extIPs.add(f.src);
+      if (dstExt) extIPs.add(f.dst);
+
+      const srcKey = srcExt ? null : ipToKey(f.src);
+      const dstKey = dstExt ? null : ipToKey(f.dst);
+
+      if (!srcExt && !dstExt) {
+        // internal ↔ internal
+        nodeBytes.set(srcKey, (nodeBytes.get(srcKey) || 0) + f.bytes);
+        nodeBytes.set(dstKey, (nodeBytes.get(dstKey) || 0) + f.bytes);
+        const ek = srcKey < dstKey ? `${srcKey}|${dstKey}` : `${dstKey}|${srcKey}`;
+        intEdgeMap.set(ek, (intEdgeMap.get(ek) || 0) + f.bytes);
+      } else if (!srcExt && dstExt) {
+        // internal → Internet
+        nodeBytes.set(srcKey, (nodeBytes.get(srcKey) || 0) + f.bytes);
+        inetBytes += f.bytes;
+        const e = inetEdges.get(srcKey) || { toInet: 0, fromInet: 0 };
+        e.toInet += f.bytes; inetEdges.set(srcKey, e);
+      } else if (srcExt && !dstExt) {
+        // Internet → internal
+        nodeBytes.set(dstKey, (nodeBytes.get(dstKey) || 0) + f.bytes);
+        inetBytes += f.bytes;
+        const e = inetEdges.get(dstKey) || { toInet: 0, fromInet: 0 };
+        e.fromInet += f.bytes; inetEdges.set(dstKey, e);
+      }
+    }
+
+    const hasInternet  = extIPs.size > 0;
+    const internalKeys = [...nodeBytes.keys()].slice(0, hasInternet ? 35 : 40);
+    const allBytes     = [...nodeBytes.values(), inetBytes].filter(Boolean);
+    const maxB         = allBytes.length ? Math.max(...allBytes) : 1;
+    const maxE         = Math.max(...[...intEdgeMap.values(), ...[...inetEdges.values()].map(e => Math.max(e.toInet, e.fromInet))], 1);
+
+    const TYPE_COLOR = {
+      'NAT Gateway': '#f59e0b', 'Network Load Balancer': '#8b5cf6',
+      'Application Load Balancer': '#a78bfa', 'Server': '#0ea5e9', 'Server NIC': '#0ea5e9'
+    };
+    const TYPE_STROKE = {
+      'NAT Gateway': '#fbbf24', 'Network Load Balancer': '#a78bfa',
+      'Application Load Balancer': '#c4b5fd', 'Server': '#38bdf8', 'Server NIC': '#38bdf8'
+    };
+    const TYPE_SHORT = {
+      'NAT Gateway': 'NAT GW', 'Network Load Balancer': 'NLB',
+      'Application Load Balancer': 'ALB', 'Server': 'Server', 'Server NIC': 'Server'
+    };
+
+    // Build internal nodes; Internet node pinned to right-centre
+    const nodes = internalKeys.map(key => {
+      // key is an IP (servers) or a resourceId (ALB/NLB/NAT)
+      let meta = flIpDeviceMap.get(key);
+      if (!meta) {
+        for (const [, m] of flIpDeviceMap) { if (m.resourceId === key) { meta = m; break; } }
+      }
+      const devType = meta ? (meta.type || 'Server') : 'Server';
+      const devName = meta ? (meta.label || '') : '';
+      const typeTag = TYPE_SHORT[devType] || devType;
+      // Collect IPs that belong to this node for the label
+      const ips = [];
+      for (const [ip, m] of flIpDeviceMap) {
+        if ((m.resourceId && m.resourceId === key) || ip === key) ips.push(ip);
+      }
+      const ipLabel = ips.length > 1 ? `${ips.length} IPs` : (ips[0] || key);
+      return {
+        ip: key, ipLabel, devName, typeTag, devType, pinned: false,
+        x: 80 + Math.random() * (W * 0.65), y: 80 + Math.random() * (H - 160),
+        vx: 0, vy: 0, r: 8 + 16 * Math.sqrt((nodeBytes.get(key) || 0) / maxB)
+      };
+    });
+
+    let inetNode = null;
+    if (hasInternet) {
+      inetNode = {
+        ip: '__internet__', devName: `${extIPs.size} IP${extIPs.size !== 1 ? 's' : ''}`,
+        typeTag: 'Internet', devType: 'internet', pinned: true,
+        x: W * 0.88, y: H * 0.5, vx: 0, vy: 0,
+        r: 18 + 14 * Math.sqrt(inetBytes / maxB)
+      };
+      nodes.push(inetNode);
+    }
+
+    const nodeIdx = Object.fromEntries(nodes.map((n, i) => [n.ip, i]));
+    const inetIdx = hasInternet ? nodeIdx['__internet__'] : -1;
+
+    // Internal ↔ internal edges
+    const edges = [...intEdgeMap.entries()].map(([k, b]) => {
+      const [src, dst] = k.split('|');
+      return { si: nodeIdx[src], di: nodeIdx[dst], w: Math.max(0.5, 5 * b / maxE), internet: false };
+    }).filter(e => e.si !== undefined && e.di !== undefined);
+
+    // Internet edges
+    if (hasInternet) {
+      for (const [key, e] of inetEdges) {
+        const si = nodeIdx[key];
+        if (si === undefined) continue;
+        const total = e.toInet + e.fromInet;
+        edges.push({ si, di: inetIdx, w: Math.max(0.5, 5 * total / maxE), internet: true });
+      }
+    }
+
+    if (flGraphAnim) cancelAnimationFrame(flGraphAnim);
+    let ticks = 0;
+
+    function step() {
+      // Physics — skip pinned nodes
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].pinned) continue;
+        nodes[i].vx *= 0.85; nodes[i].vy *= 0.85;
+        for (let j = i + 1; j < nodes.length; j++) {
+          const dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
+          const d2 = dx*dx + dy*dy + 1, f = 2200 / d2;
+          nodes[i].vx += f * dx; nodes[i].vy += f * dy;
+          if (!nodes[j].pinned) { nodes[j].vx -= f * dx; nodes[j].vy -= f * dy; }
+        }
+        // Pull toward left-centre (away from Internet node on the right)
+        nodes[i].vx += (W * 0.38 - nodes[i].x) * 0.002;
+        nodes[i].vy += (H / 2   - nodes[i].y) * 0.002;
+      }
+      for (const e of edges) {
+        const a = nodes[e.si], b = nodes[e.di];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d  = Math.sqrt(dx*dx + dy*dy) || 1;
+        const f  = (d - 130) * 0.03;
+        const fx = f * dx / d, fy = f * dy / d;
+        if (!a.pinned) { a.vx += fx; a.vy += fy; }
+        if (!b.pinned) { b.vx -= fx; b.vy -= fy; }
+      }
+      for (const n of nodes) {
+        if (n.pinned) continue;
+        n.x = Math.max(n.r + 50, Math.min(W * 0.72 - n.r, n.x + n.vx));
+        n.y = Math.max(n.r + 30, Math.min(H - n.r - 30, n.y + n.vy));
+      }
+
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, W, H);
+
+      // Draw a subtle "internet zone" backdrop
+      if (hasInternet && inetNode) {
+        ctx.save();
+        const grd = ctx.createRadialGradient(inetNode.x, inetNode.y, 10, inetNode.x, inetNode.y, 130);
+        grd.addColorStop(0, 'rgba(16,185,129,0.08)');
+        grd.addColorStop(1, 'rgba(16,185,129,0)');
+        ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
+
+      // Edges
+      for (const e of edges) {
+        const a = nodes[e.si], b = nodes[e.di];
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = e.internet ? 'rgba(16,185,129,0.45)' : 'rgba(14,165,233,0.3)';
+        ctx.lineWidth = e.w; ctx.stroke();
+      }
+
+      // Internal nodes
+      for (const n of nodes) {
+        if (n.pinned) continue;
+        const fill   = TYPE_COLOR[n.devType]  || '#0ea5e9';
+        const stroke = TYPE_STROKE[n.devType] || '#38bdf8';
+        ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI*2);
+        ctx.fillStyle = fill; ctx.fill();
+        ctx.strokeStyle = stroke; ctx.lineWidth = 1.5; ctx.stroke();
+
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        let ly = n.y + n.r + 5;
+        if (n.typeTag) {
+          ctx.font = 'bold 9px sans-serif'; ctx.fillStyle = stroke;
+          ctx.fillText(n.typeTag, n.x, ly); ly += 11;
+        }
+        if (n.devName) {
+          ctx.font = '10px sans-serif'; ctx.fillStyle = '#e2e8f0';
+          ctx.fillText(n.devName, n.x, ly); ly += 12;
+        }
+        ctx.font = '9px monospace'; ctx.fillStyle = '#64748b';
+        ctx.fillText(n.ipLabel || n.ip, n.x, ly);
+      }
+
+      // Internet cloud node (drawn last, always on top)
+      if (hasInternet && inetNode) {
+        const n = inetNode;
+        drawCloud(ctx, n.x, n.y - n.r * 0.1, n.r, 'rgba(16,185,129,0.18)', '#10b981');
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        let ly = n.y + n.r * 0.92;
+        ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#10b981';
+        ctx.fillText('Internet', n.x, ly);
+        ctx.font = '9px sans-serif'; ctx.fillStyle = '#6ee7b7';
+        ctx.fillText(n.devName, n.x, ly + 14);
+      }
+
+      ticks++;
+      if (ticks < 180) flGraphAnim = requestAnimationFrame(step);
+    }
+    flGraphAnim = requestAnimationFrame(step);
+  }
+</script>
+</body>
+</html>
