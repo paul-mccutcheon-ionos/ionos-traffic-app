@@ -1,57 +1,115 @@
 # IONOS Traffic & Cost Tool
 
-A self-hosted web application for querying, visualising, and projecting IONOS Cloud network traffic and billing data.
+A web-based dashboard for IONOS Cloud customers to monitor network traffic, understand billing, and forecast next-month costs — all from a browser with no installation required beyond running the app.
 
-## Features
+---
 
-- **IP Traffic** — query inbound/outbound traffic for any public IP, with daily bar chart and breakdown table
-- **VDC Traffic** — aggregate traffic across all IPs in a Virtual Data Centre, with per-IP breakdown and device classification (Server, NAT Gateway, ALB, NLB, Kubernetes Node)
-- **S3 Object Storage** — query object storage traffic meters at contract level
-- **Multi-month Range** — query across up to 12 months with totals and trend charts
-- **Cost Estimation** — estimated outbound cost per month with 2 TB free-tier applied; supports EUR / GBP / USD markets
-- **Next Month Traffic & Cost Projection** — linear regression over historical months with semicircular gauges for at-a-glance trend indication
-- **Flow Logs** — browse VPC flow logs stored in IONOS S3; create and manage flow log buckets and configurations
-- **Network Graph** — visualise traffic relationships between resources (servers, ALBs, NLBs, NAT gateways)
-- **Browse IPs** — list and filter all public IPs in a contract by device type
-- **Traffic Meters** — raw IONOS billing meter IDs breakdown per contract period
+## Who is this for?
 
-## Quick Start
+IONOS Cloud account holders who want to:
+- Understand what is generating outbound traffic and how much it costs
+- Track traffic trends across one or many Virtual Data Centres
+- Browse and analyse VPC flow logs stored in IONOS Object Storage
+- Project next-month traffic and costs before the bill arrives
 
-```bash
-cp .env.example .env
-# Fill in your credentials in .env
-npm install
-npm start
-```
+---
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+## What you need
 
-## Configuration
+- Your **IONOS API Token** — found in the IONOS DCD under *API Keys*
+- Your **Contract ID** — visible in the DCD or billing portal
+- For S3 / flow log features: an **S3 Access Key** and **S3 Secret Key** (from the DCD Object Storage section)
 
-Copy `.env.example` to `.env` and fill in your values:
+You enter these in the browser when you open the app. Nothing is stored on the server.
 
-| Variable | Description |
-|---|---|
-| `IONOS_API_TOKEN` | IONOS Cloud API token (from DCD → API Keys) |
-| `IONOS_CONTRACT_ID` | Your IONOS contract number |
-| `IONOS_S3_ACCESS_KEY` | S3-compatible access key for Object Storage |
-| `IONOS_S3_SECRET_KEY` | S3-compatible secret key |
-| `AUTH_CONTRACT_ID` | Display name shown in the password prompt (optional) |
-| `AUTH_PASSWORD_HASH` | bcrypt hash to password-protect the server-side `.env` prefill (optional) |
-| `PORT` | Server port (default: 3000) |
+---
 
-Generate a password hash:
-```bash
-node -e "require('bcryptjs').hash('yourpassword',10).then(h=>console.log(h))"
-```
+## How to use
 
-## Credentials
+### Entering your credentials
+Open the app and fill in the **Connection** section at the top:
+- **API Token** and **Contract ID** are required for all traffic queries
+- **S3 credentials** are only needed if you want to query Object Storage traffic or browse flow logs
+- Select your **Market** (EUR / GBP / USD) and adjust the **Outbound Rate per GB** if your contract differs from the default
 
-Credentials entered in the browser are used only for IONOS API calls and are never stored server-side. Alternatively, load a local `.env` file directly in the browser — it is parsed client-side and never transmitted to the server.
+You can also click **Load .env file** to load a pre-filled configuration file from your computer — it is read entirely in your browser and never sent to the server.
 
-## Notes
+---
 
-- Outbound cost estimates apply the IONOS 2 TB/month free-tier before calculating billable usage
-- Inbound traffic on NAT Gateway IPs is return traffic for NAT sessions and is not billable
-- Flow log queries require S3 credentials and an existing flow log bucket
-- The projection uses linear regression; accuracy improves with more historical months selected
+### IP Traffic
+Query inbound and outbound traffic for a single public IP address:
+1. Enter an IP address in the **IP Traffic** tab
+2. Select a billing period (month/year)
+3. Click **Query Traffic**
+
+Shows: monthly totals, estimated cost, daily bar chart, and a full daily breakdown table.
+
+---
+
+### VDC Traffic
+Query aggregate traffic for all IPs in a Virtual Data Centre:
+1. Select a VDC from the dropdown (or type a name / choose *All VDCs in Contract*)
+2. Select a billing period
+3. Click **Query Traffic**
+
+Shows: VDC-level totals, per-IP breakdown with device types (Server, NAT Gateway, ALB, NLB, Kubernetes Node), traffic meter IDs, and S3 Object Storage meters.
+
+---
+
+### Multi-month Range
+Query up to 12 consecutive months at once to see trends:
+1. Set the **Range** dropdown to more than 1 month
+2. Select an **End Period**
+3. Click **Query Traffic**
+
+Shows: monthly trend chart, cumulative totals, and estimated cost over the range.
+
+---
+
+### Next Month Traffic & Cost Projection
+After any query, the **Next Month Traffic and Cost Projection** card appears:
+1. Choose how many months of history to base the projection on
+2. Click **Calculate Projection**
+
+Shows: semicircular gauge charts for at-a-glance traffic and cost direction, plus detailed projected inbound, outbound, and cost figures. Cost shows as zero if projected outbound is within the free 2 TB allowance.
+
+---
+
+### S3 Object Storage
+Query Object Storage traffic meters at contract level:
+1. Go to the **S3 Object Storage** tab
+2. Select a billing period
+3. Click **Query Traffic**
+
+---
+
+### Flow Logs
+Browse VPC flow log records stored in IONOS Object Storage:
+1. After a VDC query, scroll down to the **Flow Logs** section
+2. Select a date range and click **Load Flow Logs**
+3. Optionally visualise traffic relationships in the **Network Graph**
+
+To set up flow logging for the first time, use the **Create Bucket** and **Enable Flow Logs** buttons in the Flow Logs card.
+
+---
+
+### Browse IPs
+Click **Browse IPs** at the top to list all public IP addresses on your contract, filtered by device type.
+
+---
+
+## Tips
+
+- The **2 TB free tier** for outbound traffic is applied automatically in all cost estimates — only usage above 2,048 GB is shown as billable
+- Inbound traffic on NAT Gateway IPs is return traffic from NAT sessions and is not billable
+- If you see a `401` error, your API token has expired — generate a new one in the DCD
+- The projection accuracy improves with more historical months selected (6–12 is recommended)
+
+---
+
+## Known limitations
+
+- Cost estimates are indicative only — verify rates and free-tier details against your IONOS contract
+- Flow log queries require VPC flow logging to be enabled and logs stored in IONOS Object Storage
+- DNS reverse-lookup uses the HackerTarget API (free tier: 100 lookups/day); lookups will silently fail if the limit is reached
+- S3 bucket creation for flow logs may take a minute to propagate before the first log upload succeeds

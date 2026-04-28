@@ -11,7 +11,7 @@ const { S3Client, CreateBucketCommand, HeadBucketCommand,
         GetBucketLifecycleConfigurationCommand } = require('@aws-sdk/client-s3');
 
 const app  = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 const CLOUD_API   = 'https://api.ionos.com/cloudapi/v6';
 const BILLING_API = 'https://api.ionos.com/billing';
