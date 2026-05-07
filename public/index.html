@@ -25,6 +25,13 @@
     .header-logo img { display: block; height: 48px; width: auto; }
     .header-title { text-align: center; flex: 1; }
     .header-title h1 { font-size: 1.75rem; font-weight: 700; color: #38bdf8; letter-spacing: 0.03em; }
+    .header-title h1 .version-badge {
+      display: inline-block; vertical-align: middle;
+      margin-left: 0.6rem; padding: 0.15rem 0.55rem;
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
+      color: #94a3b8; background: #0f1117;
+      border: 1px solid #2d3348; border-radius: 999px;
+    }
     .header-title p  { color: #94a3b8; margin-top: 0.4rem; font-size: 0.95rem; }
     .header-spacer { width: 64px; }
 
@@ -379,7 +386,7 @@
       <img src="/ionos-logo.svg" alt="IONOS" />
     </div>
     <div class="header-title">
-      <h1>IONOS Traffic Billing Tool</h1>
+      <h1>IONOS Traffic Billing Tool<span id="app-version" class="version-badge"></span></h1>
       <p>Query IP traffic, VDC aggregate traffic, and S3 Object Storage billing</p>
     </div>
     <div class="header-spacer"></div>
@@ -433,6 +440,12 @@
               &#128194; Load .env file
             </label>
             <input type="file" id="env-file-upload" accept=".env,text/plain" style="display:none" />
+            <a id="env-example-download" href="/.env.example" download=".env.example"
+               style="display:inline-flex;align-items:center;gap:0.4rem;background:#1e293b;border:1px solid #334155;
+                      color:#94a3b8;border-radius:6px;padding:0.3rem 0.75rem;font-size:0.78rem;text-decoration:none;
+                      white-space:nowrap;user-select:none">
+              &#11015; Download .env.example
+            </a>
             <div id="env-loaded-banner" style="display:none;font-size:0.78rem;color:#6ee7b7">
               &#10003; Credentials pre-loaded from <code style="background:#0f172a;padding:1px 4px;border-radius:3px">.env</code>
             </div>
@@ -1694,6 +1707,13 @@
     return { status: 200, cfg: await r.json() };
   }
 
+  fetch('/api/version')
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      if (d?.version) document.getElementById('app-version').textContent = 'v' + d.version;
+    })
+    .catch(() => {});
+
   (async () => {
     try {
       const result = await fetchEnvConfig(null);
@@ -1993,7 +2013,16 @@
           s3Endpoint: flS3Creds.s3Endpoint, s3Region: flS3Creds.s3Region,
           bucketName, maxFiles, sinceSeconds, token, vdcQuery })
       });
-      const d = await r.json();
+      const txt = await r.text();
+      let d;
+      try { d = JSON.parse(txt); }
+      catch {
+        const hint = r.status === 504 || /gateway/i.test(txt)
+          ? ' (proxy gateway timeout — try a smaller "Max files" value or a shorter time window).'
+          : '';
+        alert(`Server returned a non-JSON response (HTTP ${r.status})${hint}`);
+        return;
+      }
       if (!r.ok) { alert(d.error || `Error ${r.status}`); return; }
 
       // Merge returned ipMeta into the device map (server fetch wins over stale VDC query data)

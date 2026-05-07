@@ -12,12 +12,17 @@ const { S3Client, CreateBucketCommand, HeadBucketCommand,
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+const APP_VERSION = require('./package.json').version;
+const ENV_EXAMPLE = require('fs').readFileSync(path.join(__dirname, '.env.example'), 'utf8');
 
 const CLOUD_API   = 'https://api.ionos.com/cloudapi/v6';
 const BILLING_API = 'https://api.ionos.com/billing';
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+process.on('uncaughtException',  err => console.error('[uncaughtException]',  err && err.stack || err));
+process.on('unhandledRejection', err => console.error('[unhandledRejection]', err && err.stack || err));
 
 // ── Meter ID metadata ───────────────────────────────────────────────────────
 
@@ -796,6 +801,16 @@ app.get('/api/env-config', async (req, res) => {
   });
 });
 
+app.get('/api/version', (req, res) => {
+  res.json({ version: APP_VERSION });
+});
+
+app.get('/.env.example', (req, res) => {
+  res.type('text/plain')
+     .set('Content-Disposition', 'attachment; filename=".env.example"')
+     .send(ENV_EXAMPLE);
+});
+
 app.get('/api/flowlogs/s3-regions', (req, res) => {
   res.json(Object.entries(IONOS_S3_REGIONS).map(([loc, r]) => ({ loc, ...r })));
 });
@@ -1022,8 +1037,20 @@ app.post('/api/flowlogs/read', async (req, res) => {
 
   let objects;
   try {
-    const list = await s3.send(new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: parseInt(maxFiles) }));
-    objects = (list.Contents || []).sort((a, b) => b.LastModified - a.LastModified);
+    // Paginate up to 5000 keys so we can sort by LastModified and pick the most recent maxFiles.
+    // ListObjectsV2 returns keys alphabetically; applying MaxKeys before sorting would return the
+    // oldest files instead of the newest, causing the time-window filter to reject everything.
+    const allContents = [];
+    let token;
+    do {
+      const params = { Bucket: bucketName, MaxKeys: 1000 };
+      if (token) params.ContinuationToken = token;
+      const page = await s3.send(new ListObjectsV2Command(params));
+      allContents.push(...(page.Contents || []));
+      token = page.IsTruncated ? page.NextContinuationToken : null;
+      if (allContents.length >= 5000) break;
+    } while (token);
+    objects = allContents.sort((a, b) => b.LastModified - a.LastModified);
   } catch (e) {
     return res.status(502).json({ error: `S3 list failed: ${e.message}` });
   }
@@ -1034,34 +1061,53 @@ app.post('/api/flowlogs/read', async (req, res) => {
   let totalRecords = 0, filteredRecords = 0;
   let dataStart = Infinity, dataEnd = 0;
 
-  for (const obj of objects.slice(0, parseInt(maxFiles))) {
-    try {
-      const getResp = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: obj.Key }));
-      const buf = await streamToBuffer(getResp.Body);
-      let text;
-      try { text = zlib.gunzipSync(buf).toString('utf8'); } catch { text = buf.toString('utf8'); }
-      for (const line of text.split('\n')) {
-        const p = line.trim().split(/\s+/);
-        if (p.length < 14 || p[0] === 'version' || p[3] === '-') continue;
-        totalRecords++;
-        const [, , ifaceId, src, dst, sport, dport, proto, packets, bytes, start, end, action] = p;
-        const startSec = parseInt(start) || 0;
-        const endSec   = parseInt(end)   || 0;
-        if (cutoff > 0 && startSec < cutoff) continue;
-        filteredRecords++;
-        if (startSec < dataStart) dataStart = startSec;
-        if (endSec   > dataEnd)   dataEnd   = endSec;
-        const key = `${src}|${dst}|${proto}|${dport}`;
-        const e = flowMap.get(key) || { src, dst, proto: PROTO[proto] || proto, dport, sport, ifaceId, action, packets: 0, bytes: 0, count: 0, firstSeen: startSec, lastSeen: endSec };
-        e.packets += parseInt(packets) || 0;
-        e.bytes   += parseInt(bytes)   || 0;
-        e.count++;
-        if (startSec < e.firstSeen) e.firstSeen = startSec;
-        if (endSec   > e.lastSeen)  e.lastSeen  = endSec;
-        flowMap.set(key, e);
+  // Fetch+parse files in parallel (concurrency-limited) so we stay under the
+  // reverse-proxy read timeout. Each worker parses its file as it lands and
+  // then drops the buffer/text, so peak memory stays bounded by CONCURRENCY,
+  // not by maxFiles.
+  const targetFiles = objects.slice(0, parseInt(maxFiles));
+  const CONCURRENCY = 8;
+
+  const parseText = text => {
+    for (const line of text.split('\n')) {
+      const p = line.trim().split(/\s+/);
+      if (p.length < 14 || p[0] === 'version' || p[3] === '-') continue;
+      totalRecords++;
+      const [, , ifaceId, src, dst, sport, dport, proto, packets, bytes, start, end, action] = p;
+      const startSec = parseInt(start) || 0;
+      const endSec   = parseInt(end)   || 0;
+      if (cutoff > 0 && startSec < cutoff) continue;
+      filteredRecords++;
+      if (startSec < dataStart) dataStart = startSec;
+      if (endSec   > dataEnd)   dataEnd   = endSec;
+      const key = `${src}|${dst}|${proto}|${dport}`;
+      const e = flowMap.get(key) || { src, dst, proto: PROTO[proto] || proto, dport, sport, ifaceId, action, packets: 0, bytes: 0, count: 0, firstSeen: startSec, lastSeen: endSec };
+      e.packets += parseInt(packets) || 0;
+      e.bytes   += parseInt(bytes)   || 0;
+      e.count++;
+      if (startSec < e.firstSeen) e.firstSeen = startSec;
+      if (endSec   > e.lastSeen)  e.lastSeen  = endSec;
+      flowMap.set(key, e);
+    }
+  };
+
+  let idx = 0;
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targetFiles.length) }, async () => {
+    while (true) {
+      const i = idx++;
+      if (i >= targetFiles.length) return;
+      try {
+        const getResp = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: targetFiles[i].Key }));
+        const buf = await streamToBuffer(getResp.Body);
+        let text;
+        try { text = zlib.gunzipSync(buf).toString('utf8'); }
+        catch { text = buf.toString('utf8'); }
+        parseText(text);
+      } catch (e) {
+        console.error('[flowlogs/read] file fetch/parse error:', targetFiles[i]?.Key, e?.message);
       }
-    } catch (_) {}
-  }
+    }
+  }));
 
   const flows = Array.from(flowMap.values()).sort((a, b) => b.bytes - a.bytes).slice(0, 1000);
   res.json({ flows, ipMeta, filesRead: objects.length, totalRecords, filteredRecords,
