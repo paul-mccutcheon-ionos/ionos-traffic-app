@@ -128,6 +128,30 @@ async function getDatacenterIPs(datacenterId, token) {
   return ipMap;
 }
 
+// Hit /billing/{contractId}/usage — the only endpoint that exposes per-meter
+// S3 and CT totals. It is rolling current-period (no period parameter), and
+// aggregates across multiple "datacenters" (Region buckets + a synthetic
+// "Traffic" dc). Returns null if the endpoint fails (caller can ignore).
+async function fetchContractUsage(contractId, token) {
+  let data;
+  try { data = await billingGet(`/${encodeURIComponent(contractId)}/usage`, token); }
+  catch (_) { return null; }
+  const agg = new Map();
+  for (const dc of data?.datacenters || [])
+    for (const m of dc.meters || []) {
+      const id = m.meterId;
+      if (!/^S3|^CTI|^CTO/.test(id)) continue;
+      const q  = parseFloat(m.quantity?.quantity) || 0;
+      const cur = agg.get(id) || { quantity: 0, unit: m.quantity?.unit || '', desc: m.meterDesc || '' };
+      cur.quantity += q;
+      agg.set(id, cur);
+    }
+  const meters = {};
+  for (const [k, v] of agg)
+    meters[k] = { quantity: Math.floor(v.quantity * 10000) / 10000, unit: v.unit, desc: v.desc };
+  return { startDate: data?.startDate || null, endDate: data?.endDate || null, meters };
+}
+
 // Try to extract a Map<meterId, {totalBytes}> from various possible billing response shapes
 function extractMeters(data) {
   const m = new Map();
@@ -322,9 +346,9 @@ app.post('/api/query-vdc', async (req, res) => {
       return res.status(404).json({ error: `No datacenter matched "${query}".` });
   }
 
-  let ipMaps, billingIps, metersData;
+  let ipMaps, billingIps, metersData, usage;
   try {
-    [ipMaps, billingIps, metersData] = await Promise.all([
+    [ipMaps, billingIps, metersData, usage] = await Promise.all([
       Promise.all(matched.map(dc => getDatacenterIPs(dc.id, token).then(m => ({ dc, ipMap: m })))),
       billingGet(
         `/${encodeURIComponent(contractId)}/traffic/${encodeURIComponent(period)}?ip=true`,
@@ -338,7 +362,8 @@ app.post('/api/query-vdc', async (req, res) => {
       billingGet(
         `/${encodeURIComponent(contractId)}/traffic/${encodeURIComponent(period)}`,
         token
-      ).catch(() => null)
+      ).catch(() => null),
+      fetchContractUsage(contractId, token),
     ]);
   } catch (err) {
     return res.status(err.status || 502).json({ error: err.message });
@@ -414,7 +439,7 @@ app.post('/api/query-vdc', async (req, res) => {
       ipCount: matchedBilling.length, totalIpsInCloud: allIpMeta.size,
       totalInGB, totalOutGB
     },
-    ips, dates, trafficMeters, s3Meters
+    ips, dates, trafficMeters, s3Meters, usage
   });
 });
 
@@ -426,12 +451,15 @@ app.post('/api/query-s3', async (req, res) => {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period))
     return res.status(400).json({ error: 'Invalid billing period. Use YYYY-MM.' });
 
-  let metersData;
+  // Run /traffic and /usage in parallel — /usage is the only endpoint that
+  // exposes real per-meter S3 and CT totals; /traffic gives nothing for S3
+  // but we keep it for backward compatibility with the existing UI.
+  let metersData, usage;
   try {
-    metersData = await billingGet(
-      `/${encodeURIComponent(contractId)}/traffic/${encodeURIComponent(period)}`,
-      token
-    );
+    [metersData, usage] = await Promise.all([
+      billingGet(`/${encodeURIComponent(contractId)}/traffic/${encodeURIComponent(period)}`, token),
+      fetchContractUsage(contractId, token),
+    ]);
   } catch (err) {
     return res.status(err.status || 502).json({ error: err.message });
   }
@@ -463,7 +491,8 @@ app.post('/api/query-s3', async (req, res) => {
       inGB:  Math.floor(s3InGB  * 10000) / 10000,
       outGB: Math.floor(s3OutGB * 10000) / 10000
     },
-    allMeterIds: Array.from(apiMeters.keys())
+    allMeterIds: Array.from(apiMeters.keys()),
+    usage   // { startDate, endDate, meters: { meterId: {quantity, unit, desc} } } or null
   });
 });
 

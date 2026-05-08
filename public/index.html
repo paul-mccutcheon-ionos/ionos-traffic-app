@@ -646,6 +646,14 @@
       </p>
       <div id="vdc-s3-meter-section"></div>
     </div>
+    <div class="card" id="vdc-live-usage-card" style="display:none">
+      <h2>&#128202; Live Billing Meters (rolling MTD)</h2>
+      <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">
+        Contract-level totals from <code style="background:#0f172a;padding:1px 4px;border-radius:3px">/billing/{contract}/usage</code>.
+        Month-to-date for the current period; ignores the period selector above.
+      </p>
+      <div id="vdc-live-usage-section"></div>
+    </div>
   </div>
   <!-- VDC Projection (standalone — visible after single-month and range queries) -->
   <div class="card proj-card" id="vdc-proj-card" style="display:none">
@@ -822,6 +830,15 @@
         Meter IDs for Object Storage data transfer — Contract <strong id="s3-contract-id-label" style="color:#7dd3fc"></strong>.
       </p>
       <div id="s3-meter-section"></div>
+    </div>
+    <div class="card" id="s3-live-usage-card" style="display:none">
+      <h2>&#128202; Live Billing Meters (rolling MTD)</h2>
+      <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">
+        From <code style="background:#0f172a;padding:1px 4px;border-radius:3px">/billing/{contract}/usage</code> &mdash;
+        the only IONOS endpoint that returns per-meter S3 totals. Always month-to-date for the current period
+        (range shown below); the period selector above does not affect this data.
+      </p>
+      <div id="s3-live-usage-section"></div>
     </div>
     <div class="card" id="s3-vdc-traffic-card">
       <h2>&#128290; VDC Traffic Meters (reference)</h2>
@@ -1248,6 +1265,56 @@
 
   // ── Meter section renderer ──────────────────────────────────────────────────
 
+  // Render the rolling-MTD billing meters returned by /billing/{contract}/usage.
+  // Shape: { startDate, endDate, meters: { meterId: { quantity, unit, desc } } }.
+  function renderLiveUsage(containerId, cardId, usage) {
+    const card = document.getElementById(cardId);
+    const section = document.getElementById(containerId);
+    if (!card || !section) return;
+    if (!usage || !usage.meters || !Object.keys(usage.meters).length) {
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = '';
+
+    const groupOf = id =>
+      /^S3T[IO]/.test(id) ? 'S3 Transfer'
+      : /^S3S/.test(id)   ? 'S3 Storage'
+      : /^S3A/.test(id)   ? 'S3 API Requests'
+      : /^S3/.test(id)    ? 'S3 Other'
+      : /^CTI/.test(id)   ? 'Contract Traffic — Inbound'
+      : /^CTO/.test(id)   ? 'Contract Traffic — Outbound'
+      : 'Other';
+
+    const ids = Object.keys(usage.meters).sort();
+    const groups = new Map();
+    for (const id of ids) {
+      const g = groupOf(id);
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(id);
+    }
+
+    let html = `<div class="meter-note" style="margin-bottom:0.75rem">
+      Range: <strong style="color:#7dd3fc">${escHtml(usage.startDate || '?')} → ${escHtml(usage.endDate || '?')}</strong>
+    </div>`;
+
+    for (const [groupName, gIds] of groups) {
+      html += `<div class="meter-dir-header dir-in">${escHtml(groupName)}</div>`;
+      for (const id of gIds) {
+        const m = usage.meters[id];
+        const q = (typeof m.quantity === 'number' ? m.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 }) : m.quantity);
+        html += `
+          <div class="meter-row">
+            <span class="meter-id">${escHtml(id)}</span>
+            <span class="meter-desc">${escHtml(m.desc || '')}</span>
+            <span class="meter-val in">${escHtml(q + (m.unit ? ' ' + m.unit : ''))}</span>
+            <span><span class="badge-api">API</span></span>
+          </div>`;
+      }
+    }
+    section.innerHTML = html;
+  }
+
   function renderMeterSection(containerId, meters, meterInfo, sourceNote) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -1590,6 +1657,9 @@
         renderMeterSection('vdc-s3-meter-section', d.s3Meters, S3_METER_INFO,
           'd.s3Meters — fetched from the same billing period at contract level. S3 traffic is not VDC-scoped.');
 
+        // Live billing meters (rolling MTD from /usage)
+        renderLiveUsage('vdc-live-usage-section', 'vdc-live-usage-card', d.usage);
+
         document.getElementById('vdc-results').style.display = '';
         document.getElementById('vdc-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
         showFlowLogsCard(vdcQuery, token, document.getElementById('vdcQuery').value.trim());
@@ -1608,6 +1678,9 @@
         document.getElementById('s3-proj-result').innerHTML = '';
         renderMeterSection('s3-meter-section', d.s3Meters, S3_METER_INFO);
         renderMeterSection('s3-traffic-meter-section', d.trafficMeters, TRAFFIC_METER_INFO);
+
+        // Live billing meters (rolling MTD from /usage)
+        renderLiveUsage('s3-live-usage-section', 's3-live-usage-card', d.usage);
 
         // Show meter IDs discovered in the API response
         if (d.allMeterIds?.length) {
