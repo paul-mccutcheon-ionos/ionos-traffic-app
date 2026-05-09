@@ -642,15 +642,54 @@ function currentCalendarMonth() {
 }
 
 app.post('/api/project', async (req, res) => {
-  const { token, contractId, currentPeriod, months, mode, targetIp, vdcQuery } = req.body;
-  if (!token || !contractId || !currentPeriod || !months || !mode)
+  // The form's "Query month" is intentionally ignored here — projections
+  // always anchor on today's calendar month so the regression captures the
+  // last N completed months plus the running MTD as the latest data point.
+  const { token, contractId, months, mode, targetIp, vdcQuery } = req.body;
+  if (!token || !contractId || !months || !mode)
     return res.status(400).json({ error: 'Missing required fields.' });
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(currentPeriod))
-    return res.status(400).json({ error: 'Invalid currentPeriod.' });
 
   const monthsInt  = Math.min(Math.max(parseInt(months, 10), 2), 24);
-  const periods    = getPreviousPeriods(currentPeriod, monthsInt);
-  const nextPeriod = getNextPeriod(currentPeriod);
+  const anchor     = currentCalendarMonth();             // e.g. "2026-05"
+  const periods    = getPreviousPeriods(anchor, monthsInt); // last N complete months
+  const nextPeriod = getNextPeriod(anchor);              // next calendar month
+
+  // S3 mode: /billing/{contract}/traffic never returns S3 meters, so the
+  // historical regression has nothing to fit. Use rolling MTD from /usage
+  // as a single-point estimate, annualized to a full month, and assume the
+  // run-rate continues into the next month.
+  if (mode === 's3') {
+    let mtd = null;
+    try { mtd = await fetchCurrentMtd('s3', token, contractId, anchor, null, null); }
+    catch (_) {}
+    if (!mtd || mtd.daysCovered <= 0) {
+      return res.json({
+        history: [],
+        projection: { period: nextPeriod, insufficient: true },
+        nextPeriod, s3MtdOnly: true,
+      });
+    }
+    const dim    = daysInMonth(anchor);
+    const factor = dim / mtd.daysCovered;
+    const annIn  = Math.round(mtd.inGB  * factor * 100) / 100;
+    const annOut = Math.round(mtd.outGB * factor * 100) / 100;
+    return res.json({
+      history: [{
+        period: anchor, inGB: annIn, outGB: annOut, ok: true, isMtd: true,
+        mtdInGB: mtd.inGB, mtdOutGB: mtd.outGB,
+        daysCovered: mtd.daysCovered, daysInMonth: dim,
+      }],
+      projection: {
+        period: nextPeriod,
+        inGB: annIn, outGB: annOut,
+        inTrendPct: 0, outTrendPct: 0,
+        inSlope: 0,   outSlope: 0,
+        dataPoints: 1,
+      },
+      nextPeriod,
+      s3MtdOnly: true,
+    });
+  }
 
   let vdcIpSet = null;
   if (mode === 'vdc') {
@@ -676,9 +715,12 @@ app.post('/api/project', async (req, res) => {
   if (mode === 'ip' && !targetIp)
     return res.status(400).json({ error: 'targetIp required for IP mode.' });
 
-  const settled = await Promise.allSettled(
-    periods.map(p => fetchMonthlyTotals(mode, token, contractId, p, targetIp, vdcIpSet))
-  );
+  // Fetch the last N completed months and the running MTD in parallel.
+  const [settled, mtd] = await Promise.all([
+    Promise.allSettled(periods.map(p => fetchMonthlyTotals(mode, token, contractId, p, targetIp, vdcIpSet))),
+    fetchCurrentMtd(mode, token, contractId, anchor, targetIp, vdcIpSet).catch(() => null),
+  ]);
+
   const history = periods.map((period, i) => {
     const r = settled[i];
     return r.status === 'fulfilled'
@@ -686,30 +728,22 @@ app.post('/api/project', async (req, res) => {
       : { period, inGB: null, outGB: null, ok: false, error: r.reason?.message };
   });
 
-  // Include the current month-to-date as the most recent regression point —
-  // partial-month raw value would underweight the trend, so annualize to a
-  // full-month estimate (mtd × daysInMonth / daysCovered) before adding it.
-  // Only do this when the requested currentPeriod is the actual calendar
-  // month, otherwise we'd be conflating periods.
-  let mtd = null;
-  if (currentPeriod === currentCalendarMonth()) {
-    try { mtd = await fetchCurrentMtd(mode, token, contractId, currentPeriod, targetIp, vdcIpSet); }
-    catch (_) { mtd = null; }
-    if (mtd && mtd.daysCovered > 0) {
-      const dim    = daysInMonth(currentPeriod);
-      const factor = dim / mtd.daysCovered;
-      history.push({
-        period: currentPeriod,
-        inGB:   Math.round(mtd.inGB  * factor * 100) / 100,
-        outGB:  Math.round(mtd.outGB * factor * 100) / 100,
-        ok: true,
-        isMtd: true,
-        mtdInGB:     mtd.inGB,
-        mtdOutGB:    mtd.outGB,
-        daysCovered: mtd.daysCovered,
-        daysInMonth: dim,
-      });
-    }
+  // Append the current MTD as the most recent regression point, annualized
+  // (mtd × daysInMonth / daysCovered) so a partial month does not pull the
+  // slope down.
+  if (mtd && mtd.daysCovered > 0) {
+    const dim    = daysInMonth(anchor);
+    const factor = dim / mtd.daysCovered;
+    history.push({
+      period: anchor,
+      inGB:   Math.round(mtd.inGB  * factor * 100) / 100,
+      outGB:  Math.round(mtd.outGB * factor * 100) / 100,
+      ok: true, isMtd: true,
+      mtdInGB:     mtd.inGB,
+      mtdOutGB:    mtd.outGB,
+      daysCovered: mtd.daysCovered,
+      daysInMonth: dim,
+    });
   }
 
   res.json({ history, projection: calcProjection(history, nextPeriod), nextPeriod });
