@@ -1055,16 +1055,29 @@
         <table>
           <thead><tr><th>Period</th><th>Inbound</th><th>Outbound</th></tr></thead>
           <tbody>
-            ${data.history.map(h => `<tr>
-              <td style="font-family:'Courier New',monospace;color:#94a3b8;font-size:0.87rem">${escHtml(h.period)}</td>
-              <td class="${h.ok && h.inGB != null ? 'in' : 'no-data'}">${h.ok && h.inGB != null ? formatGB(h.inGB) : 'No data'}</td>
-              <td class="${h.ok && h.outGB != null ? 'out' : 'no-data'}">${h.ok && h.outGB != null ? formatGB(h.outGB) : 'No data'}</td>
-            </tr>`).join('')}
+            ${data.history.map(h => {
+              const periodCell = h.isMtd
+                ? `<td style="font-family:'Courier New',monospace;color:#fbbf24;font-size:0.87rem">
+                     ${escHtml(h.period)}
+                     <span style="font-size:0.72rem;color:#64748b;font-family:inherit;margin-left:0.4rem">
+                       MTD ${h.daysCovered}/${h.daysInMonth}d → annualized
+                     </span>
+                   </td>`
+                : `<td style="font-family:'Courier New',monospace;color:#94a3b8;font-size:0.87rem">${escHtml(h.period)}</td>`;
+              const inCell  = h.ok && h.inGB  != null
+                ? `<td class="in">${formatGB(h.inGB)}${h.isMtd ? `<div style="font-size:0.7rem;color:#64748b;font-family:'Courier New',monospace">raw MTD: ${formatGB(h.mtdInGB)}</div>` : ''}</td>`
+                : `<td class="no-data">No data</td>`;
+              const outCell = h.ok && h.outGB != null
+                ? `<td class="out">${formatGB(h.outGB)}${h.isMtd ? `<div style="font-size:0.7rem;color:#64748b;font-family:'Courier New',monospace">raw MTD: ${formatGB(h.mtdOutGB)}</div>` : ''}</td>`
+                : `<td class="no-data">No data</td>`;
+              return `<tr>${periodCell}${inCell}${outCell}</tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
       <div class="meter-note">
         Linear regression over ${escHtml(String(p.dataPoints))} months of history. Trend % = average month-over-month change. Yellow = growing, blue = declining.
+        ${data.history.some(h => h.isMtd) ? '<br>Current month is included as an annualized estimate (raw MTD × daysInMonth / daysCovered) so a partial month does not pull the regression down.' : ''}
       </div>`;
     el.innerHTML = html;
   }

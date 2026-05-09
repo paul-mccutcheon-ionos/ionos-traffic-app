@@ -593,6 +593,54 @@ async function fetchMonthlyTotals(mode, token, contractId, period, targetIp, vdc
   throw new Error('Unknown mode');
 }
 
+// Pull the current period's totals together with how many days of data are
+// covered. Returns null if there is no usable data yet.
+async function fetchCurrentMtd(mode, token, contractId, currentPeriod, targetIp, vdcIpSet) {
+  if (mode === 'ip' || mode === 'vdc') {
+    const data = await billingGet(
+      `/${encodeURIComponent(contractId)}/traffic/${encodeURIComponent(currentPeriod)}?ip=true`,
+      token
+    ).catch(() => null);
+    const list = data?.trafficObj?.ip;
+    if (!Array.isArray(list)) return null;
+    const entries = mode === 'ip'
+      ? list.filter(e => e.ip === targetIp)
+      : list.filter(e => vdcIpSet.has(e.ip));
+    let inB = 0, outB = 0;
+    const dateSet = new Set();
+    for (const e of entries)
+      for (const d of e.dates || []) {
+        inB  += d.In  ?? d.in  ?? 0;
+        outB += d.Out ?? d.out ?? 0;
+        const date = d.Date || d.date;
+        if (date) dateSet.add(date);
+      }
+    if (!dateSet.size) return null;
+    return { inGB: toGB2(inB), outGB: toGB2(outB), daysCovered: dateSet.size };
+  }
+  if (mode === 's3') {
+    const usage = await fetchContractUsage(contractId, token);
+    if (!usage || !usage.startDate || !usage.endDate) return null;
+    const m = usage.meters;
+    const inGB  = (m.S3TI2100?.quantity || 0) + (m.S3TI2200?.quantity || 0);
+    const outGB = (m.S3TO2100?.quantity || 0) + (m.S3TO2200?.quantity || 0) + (m.S3TO2300?.quantity || 0);
+    const days  = Math.round((new Date(usage.endDate) - new Date(usage.startDate)) / 86400000) + 1;
+    if (days <= 0) return null;
+    return { inGB, outGB, daysCovered: days };
+  }
+  return null;
+}
+
+function daysInMonth(period) {
+  const [y, m] = period.split('-').map(Number);
+  return new Date(y, m, 0).getDate();   // day 0 of next month = last day of this month
+}
+
+function currentCalendarMonth() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 app.post('/api/project', async (req, res) => {
   const { token, contractId, currentPeriod, months, mode, targetIp, vdcQuery } = req.body;
   if (!token || !contractId || !currentPeriod || !months || !mode)
@@ -637,6 +685,32 @@ app.post('/api/project', async (req, res) => {
       ? { period, inGB: r.value.inGB, outGB: r.value.outGB, ok: true }
       : { period, inGB: null, outGB: null, ok: false, error: r.reason?.message };
   });
+
+  // Include the current month-to-date as the most recent regression point —
+  // partial-month raw value would underweight the trend, so annualize to a
+  // full-month estimate (mtd × daysInMonth / daysCovered) before adding it.
+  // Only do this when the requested currentPeriod is the actual calendar
+  // month, otherwise we'd be conflating periods.
+  let mtd = null;
+  if (currentPeriod === currentCalendarMonth()) {
+    try { mtd = await fetchCurrentMtd(mode, token, contractId, currentPeriod, targetIp, vdcIpSet); }
+    catch (_) { mtd = null; }
+    if (mtd && mtd.daysCovered > 0) {
+      const dim    = daysInMonth(currentPeriod);
+      const factor = dim / mtd.daysCovered;
+      history.push({
+        period: currentPeriod,
+        inGB:   Math.round(mtd.inGB  * factor * 100) / 100,
+        outGB:  Math.round(mtd.outGB * factor * 100) / 100,
+        ok: true,
+        isMtd: true,
+        mtdInGB:     mtd.inGB,
+        mtdOutGB:    mtd.outGB,
+        daysCovered: mtd.daysCovered,
+        daysInMonth: dim,
+      });
+    }
+  }
 
   res.json({ history, projection: calcProjection(history, nextPeriod), nextPeriod });
 });
