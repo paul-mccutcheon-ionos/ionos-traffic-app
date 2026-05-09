@@ -140,7 +140,7 @@ async function fetchContractUsage(contractId, token) {
   for (const dc of data?.datacenters || [])
     for (const m of dc.meters || []) {
       const id = m.meterId;
-      if (!/^S3|^CTI|^CTO/.test(id)) continue;
+      if (!/^S3|^CTI|^CTO|^TI\d|^TO\d/.test(id)) continue;
       const q  = parseFloat(m.quantity?.quantity) || 0;
       const cur = agg.get(id) || { quantity: 0, unit: m.quantity?.unit || '', desc: m.meterDesc || '' };
       cur.quantity += q;

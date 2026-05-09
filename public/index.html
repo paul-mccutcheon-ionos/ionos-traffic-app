@@ -1262,21 +1262,32 @@
     }
     card.style.display = '';
 
-    const groupOf = id =>
-      /^S3T[IO]/.test(id) ? 'S3 Transfer'
-      : /^S3S/.test(id)   ? 'S3 Storage'
-      : /^S3A/.test(id)   ? 'S3 API Requests'
-      : /^S3/.test(id)    ? 'S3 Other'
-      : /^CTI/.test(id)   ? 'Contract Traffic — Inbound'
-      : /^CTO/.test(id)   ? 'Contract Traffic — Outbound'
-      : 'Other';
+    // Group order matters — declared array preserves it. Each entry is
+    // [label, predicate, optional sub-note].
+    const groupDefs = [
+      ['Contract Traffic — Inbound',                 id => /^CTI/.test(id)],
+      ['Contract Traffic — Outbound',                id => /^CTO/.test(id)],
+      ['S3 Transfer — Contract-owned buckets',       id => /^S3T[IO]/.test(id),
+        'Regions: eu-central-3, eu-central-4, us-central-1.'],
+      ['S3 Transfer — User-owned regions (incl. VDC traffic)', id => /^TI\d|^TO\d/.test(id),
+        'Regions: eu-central-1, eu-central-2, eu-south-2. IONOS does not expose user-owned bucket transfer with its own meter — these meters bundle user-owned bucket transfer together with VDC traffic for the region.'],
+      ['S3 Storage',                                 id => /^S3S/.test(id)],
+      ['S3 API Requests',                            id => /^S3A/.test(id)],
+      ['S3 Other',                                   id => /^S3/.test(id)],
+      ['Other',                                      () => true],
+    ];
 
     const ids = Object.keys(usage.meters).sort();
     const groups = new Map();
+    const noteOf = new Map();
     for (const id of ids) {
-      const g = groupOf(id);
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g).push(id);
+      for (const [label, pred, note] of groupDefs) {
+        if (pred(id)) {
+          if (!groups.has(label)) { groups.set(label, []); if (note) noteOf.set(label, note); }
+          groups.get(label).push(id);
+          break;
+        }
+      }
     }
 
     let html = `<div class="meter-note" style="margin-bottom:0.75rem">
@@ -1285,6 +1296,9 @@
 
     for (const [groupName, gIds] of groups) {
       html += `<div class="meter-dir-header dir-in">${escHtml(groupName)}</div>`;
+      const note = noteOf.get(groupName);
+      if (note)
+        html += `<div class="meter-note" style="margin:-0.4rem 0 0.5rem 0;font-size:0.78rem">${escHtml(note)}</div>`;
       for (const id of gIds) {
         const m = usage.meters[id];
         const q = (typeof m.quantity === 'number' ? m.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 }) : m.quantity);
