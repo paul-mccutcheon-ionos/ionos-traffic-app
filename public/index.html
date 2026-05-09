@@ -638,22 +638,6 @@
       <div id="traffic-meter-section"></div>
     </div>
 
-    <!-- S3 Storage Traffic (same contract) -->
-    <div class="card">
-      <h2>&#129524; S3 Storage Traffic Meters</h2>
-      <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">
-        Object Storage data transfer meters for Contract ID <strong id="vdc-s3-contract-id" style="color:#7dd3fc"></strong>.
-      </p>
-      <div id="vdc-s3-meter-section"></div>
-    </div>
-    <div class="card" id="vdc-live-usage-card" style="display:none">
-      <h2>&#128202; Live Billing Meters (rolling MTD)</h2>
-      <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">
-        Contract-level totals from <code style="background:#0f172a;padding:1px 4px;border-radius:3px">/billing/{contract}/usage</code>.
-        Month-to-date for the current period; ignores the period selector above.
-      </p>
-      <div id="vdc-live-usage-section"></div>
-    </div>
   </div>
   <!-- VDC Projection (standalone — visible after single-month and range queries) -->
   <div class="card proj-card" id="vdc-proj-card" style="display:none">
@@ -1691,14 +1675,6 @@
 
         // Traffic meter section
         renderMeterSection('traffic-meter-section', d.trafficMeters, TRAFFIC_METER_INFO);
-
-        // S3 meter section (same contract)
-        document.getElementById('vdc-s3-contract-id').textContent = contractId;
-        renderMeterSection('vdc-s3-meter-section', d.s3Meters, S3_METER_INFO,
-          'd.s3Meters — fetched from the same billing period at contract level. S3 traffic is not VDC-scoped.');
-
-        // Live billing meters (rolling MTD from /usage)
-        renderLiveUsage('vdc-live-usage-section', 'vdc-live-usage-card', d.usage);
 
         document.getElementById('vdc-results').style.display = '';
         document.getElementById('vdc-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
