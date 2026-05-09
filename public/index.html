@@ -824,13 +824,6 @@
       </div>
       <div id="s3-proj-result"></div>
     </div>
-    <div class="card">
-      <h2>&#128290; S3 Storage Traffic Meters</h2>
-      <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">
-        Meter IDs for Object Storage data transfer — Contract <strong id="s3-contract-id-label" style="color:#7dd3fc"></strong>.
-      </p>
-      <div id="s3-meter-section"></div>
-    </div>
     <div class="card" id="s3-live-usage-card" style="display:none">
       <h2>&#128202; Live Billing Meters (rolling MTD)</h2>
       <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">
@@ -839,11 +832,6 @@
         (range shown below); the period selector above does not affect this data.
       </p>
       <div id="s3-live-usage-section"></div>
-    </div>
-    <div class="card" id="s3-vdc-traffic-card">
-      <h2>&#128290; VDC Traffic Meters (reference)</h2>
-      <p style="font-size:0.82rem;color:#64748b;margin-bottom:0.5rem">Network traffic billing tiers for this contract.</p>
-      <div id="s3-traffic-meter-section"></div>
     </div>
   </div>
 
@@ -1571,10 +1559,62 @@
 
   // ── S3 Mode ─────────────────────────────────────────────────────────────────
 
-  function renderS3Summary(totals) {
+  // Sum across user-owned + contract-owned across all regions, derived from
+  // /billing/{contract}/usage. Contract-owned bucket transfer is metered
+  // separately (S3TI*/S3TO*); user-owned bucket transfer is rolled into
+  // CTI1000/CTO0000 along with VDC traffic. We can only attribute the
+  // contract-owned slice cleanly — the user-owned slice is shown with a note.
+  function renderS3Summary(usage, ratePerGB, market) {
+    const m = (usage && usage.meters) || {};
+    const q = id => m[id]?.quantity || 0;
+
+    const contractInGB  = q('S3TI2100') + q('S3TI2200');
+    const contractOutGB = q('S3TO2100') + q('S3TO2200') + q('S3TO2300');
+    const storageGBd    = q('S3SU2000');
+    const apiCalls      = q('S3AU2100') * 1000 + q('S3AU2200') * 10000;
+
+    // Cost — outbound transfer × ratePerGB. Inbound is free on IONOS S3.
+    // Storage cost is excluded from the headline (different rate, different unit).
+    const cost = contractOutGB * (ratePerGB || 0);
+    const costFmt  = market.symbol + cost.toFixed(2) + ' ' + market.currency;
+    const rateNote = `${market.symbol}${ratePerGB}/GB outbound`;
+
+    const range = (usage && usage.startDate)
+      ? `${usage.startDate} → ${usage.endDate}`
+      : 'no data';
+
     document.getElementById('s3-summary-grid').innerHTML = `
-      <div class="stat-card"><div class="stat-label">Total S3 Inbound</div><div class="stat-value hi-in">${formatGB(totals.inGB)}</div><div class="rate-note">S3TI2100 + S3TI2200</div></div>
-      <div class="stat-card"><div class="stat-label">Total S3 Outbound</div><div class="stat-value hi-out">${formatGB(totals.outGB)}</div><div class="rate-note">S3TO2100 + S3TO2200 + S3TO2300</div></div>`;
+      <div class="meter-note" style="grid-column:1/-1;margin:0 0 0.5rem 0">
+        Rolling MTD: <strong style="color:#7dd3fc">${escHtml(range)}</strong>
+        &mdash; contract-owned bucket transfer (S3TI*/S3TO*) is shown below.
+        User-owned bucket transfer is rolled into <code>CTI1000</code>/<code>CTO0000</code>
+        in the Live Billing Meters card and cannot be isolated by the IONOS API.
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">S3 Inbound (contract-owned)</div>
+        <div class="stat-value hi-in">${formatGB(contractInGB)}</div>
+        <div class="rate-note">S3TI2100 + S3TI2200, all regions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">S3 Outbound (contract-owned)</div>
+        <div class="stat-value hi-out">${formatGB(contractOutGB)}</div>
+        <div class="rate-note">S3TO2100 + S3TO2200 + S3TO2300, all regions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Storage</div>
+        <div class="stat-value">${storageGBd.toFixed(2)} GB·d</div>
+        <div class="rate-note">S3SU2000 (GB-days, contract-owned)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">API Calls</div>
+        <div class="stat-value">${Math.round(apiCalls).toLocaleString()}</div>
+        <div class="rate-note">S3AU2100 × 1k + S3AU2200 × 10k</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Est. Outbound Cost</div>
+        <div class="stat-value hi-cost">${escHtml(costFmt)}</div>
+        <div class="rate-note">${escHtml(rateNote)}</div>
+      </div>`;
   }
 
   // ── Form submit ─────────────────────────────────────────────────────────────
@@ -1672,24 +1712,13 @@
         const d = await r.json();
         if (!r.ok) { showError(d.error || `Error ${r.status}`); return; }
 
-        document.getElementById('s3-contract-id-label').textContent = contractId;
-        renderS3Summary(d.totals);
+        const market = MARKETS[marketKey] || MARKETS.EU;
+        renderS3Summary(d.usage, ratePerGB, market);
         lastQueryParams = { token, contractId, currentPeriod: period, targetIp: '', vdcQuery: '' };
         document.getElementById('s3-proj-result').innerHTML = '';
-        renderMeterSection('s3-meter-section', d.s3Meters, S3_METER_INFO);
-        renderMeterSection('s3-traffic-meter-section', d.trafficMeters, TRAFFIC_METER_INFO);
 
         // Live billing meters (rolling MTD from /usage)
         renderLiveUsage('s3-live-usage-section', 's3-live-usage-card', d.usage);
-
-        // Show meter IDs discovered in the API response
-        if (d.allMeterIds?.length) {
-          const box = document.getElementById('s3-traffic-meter-section');
-          const discovered = d.allMeterIds.filter(id => !Object.keys(TRAFFIC_METER_INFO).includes(id) && !Object.keys(S3_METER_INFO).includes(id));
-          if (discovered.length) {
-            box.insertAdjacentHTML('beforeend', `<div class="meter-note">Additional meter IDs returned by API (not in defined list): <code style="color:#7dd3fc">${discovered.join(', ')}</code></div>`);
-          }
-        }
 
         document.getElementById('s3-results').style.display = '';
         document.getElementById('s3-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
