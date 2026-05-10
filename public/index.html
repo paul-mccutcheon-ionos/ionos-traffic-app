@@ -1262,10 +1262,13 @@
     }
     card.style.display = '';
 
-    // S3-only view: VDC / contract-level traffic meters live on the VDC
-    // panel, not here. Group order is the display order.
+    // S3-only view. User-owned bucket transfer uses the legacy 1000-series
+    // IDs (S3TI1000 / S3TO1000); contract-owned buckets use the 2000-series
+    // (S3TI2100/2200, S3TO2100/2200/2300).
     const groupDefs = [
-      ['S3 Transfer — Contract-owned buckets', id => /^S3T[IO]/.test(id),
+      ['S3 Transfer — User-owned buckets',     id => /^S3T[IO]1/.test(id),
+        'Regions: eu-central-1, eu-central-2, eu-south-2. Legacy 1000-series meter IDs.'],
+      ['S3 Transfer — Contract-owned buckets', id => /^S3T[IO]2/.test(id),
         'Regions: eu-central-3, eu-central-4, us-central-1.'],
       ['S3 Storage',                           id => /^S3S/.test(id)],
       ['S3 API Requests',                      id => /^S3A/.test(id)],
@@ -1573,23 +1576,25 @@
 
   // ── S3 Mode ─────────────────────────────────────────────────────────────────
 
-  // Headline S3 totals from /billing/{contract}/usage. We currently only
-  // see contract-owned bucket meters (S3TI*/S3TO*) populated; the user-
-  // owned bucket transfer should also live under an S3-prefixed meter ID
-  // but no such meter has surfaced in the API response yet for this
-  // contract — flagged via the inline note below.
+  // Headline S3 totals from /billing/{contract}/usage covering both
+  // bucket types. User-owned uses legacy 1000-series IDs; contract-owned
+  // uses 2000-series.
   function renderS3Summary(usage, ratePerGB, market) {
     const m = (usage && usage.meters) || {};
     const q = id => m[id]?.quantity || 0;
 
-    const inGB        = q('S3TI2100') + q('S3TI2200');
-    const outGB       = q('S3TO2100') + q('S3TO2200') + q('S3TO2300');
-    const storageGBd  = q('S3SU2000');
-    const apiCalls    = q('S3AU2100') * 1000 + q('S3AU2200') * 10000;
+    const userInGB      = q('S3TI1000');
+    const userOutGB     = q('S3TO1000');
+    const contractInGB  = q('S3TI2100') + q('S3TI2200');
+    const contractOutGB = q('S3TO2100') + q('S3TO2200') + q('S3TO2300');
+    const totalInGB     = userInGB  + contractInGB;
+    const totalOutGB    = userOutGB + contractOutGB;
+    const storageGBd    = q('S3SU2000');
+    const apiCalls      = q('S3AU2100') * 1000 + q('S3AU2200') * 10000;
 
     // Outbound × ratePerGB. Inbound is free on IONOS S3 per the public
     // pricing page; storage is a separate rate (different unit).
-    const cost = outGB * (ratePerGB || 0);
+    const cost = totalOutGB * (ratePerGB || 0);
     const costFmt  = market.symbol + cost.toFixed(2) + ' ' + market.currency;
     const rateNote = `${market.symbol}${ratePerGB}/GB outbound`;
 
@@ -1600,21 +1605,19 @@
     document.getElementById('s3-summary-grid').innerHTML = `
       <div class="meter-note" style="grid-column:1/-1;margin:0 0 0.5rem 0">
         Rolling MTD: <strong style="color:#7dd3fc">${escHtml(range)}</strong>
-        &mdash; figures below cover <strong>contract-owned</strong> bucket transfer
-        (<code>S3TI*</code>/<code>S3TO*</code>). User-owned bucket transfer is also billed
-        separately by IONOS but no user-owned S3 meter has appeared in this contract's
-        <code>/usage</code> response yet — likely either under a meter ID that hasn't
-        accumulated for this contract, or pending aggregation.
+        &mdash; totals cover both bucket types: user-owned (legacy
+        <code>S3TI1000</code>/<code>S3TO1000</code>) and contract-owned
+        (<code>S3TI*</code>/<code>S3TO*</code> 2000-series). Both billed separately by IONOS.
       </div>
       <div class="stat-card">
-        <div class="stat-label">S3 Inbound (contract-owned)</div>
-        <div class="stat-value hi-in">${formatGB(inGB)}</div>
-        <div class="rate-note">S3TI2100 + S3TI2200, all regions</div>
+        <div class="stat-label">S3 Inbound (total)</div>
+        <div class="stat-value hi-in">${formatGB(totalInGB)}</div>
+        <div class="rate-note">${formatGB(userInGB)} user-owned + ${formatGB(contractInGB)} contract-owned</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">S3 Outbound (contract-owned)</div>
-        <div class="stat-value hi-out">${formatGB(outGB)}</div>
-        <div class="rate-note">S3TO2100 + S3TO2200 + S3TO2300, all regions</div>
+        <div class="stat-label">S3 Outbound (total)</div>
+        <div class="stat-value hi-out">${formatGB(totalOutGB)}</div>
+        <div class="rate-note">${formatGB(userOutGB)} user-owned + ${formatGB(contractOutGB)} contract-owned</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Storage</div>
