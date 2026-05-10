@@ -1262,18 +1262,9 @@
     }
     card.style.display = '';
 
-    // Group order matters — declared array preserves it. Each entry is
-    // [label, predicate, optional sub-note]. S3 meters always carry the
-    // "S3" prefix; TI1000/TO1000 are non-S3 regional traffic meters.
+    // S3-only view: VDC / contract-level traffic meters live on the VDC
+    // panel, not here. Group order is the display order.
     const groupDefs = [
-      ['Contract Traffic — Inbound',           id => /^CTI/.test(id),
-        'Total chargeable inbound at the contract level.'],
-      ['Contract Traffic — Outbound',          id => /^CTO/.test(id),
-        'Total chargeable outbound at the contract level (first 2 TB tier).'],
-      ['Regional Traffic — Inbound',           id => /^TI\d/.test(id),
-        'Per-region inbound traffic meter (non-S3).'],
-      ['Regional Traffic — Outbound',          id => /^TO\d/.test(id),
-        'Per-region outbound traffic meter (non-S3).'],
       ['S3 Transfer — Contract-owned buckets', id => /^S3T[IO]/.test(id),
         'Regions: eu-central-3, eu-central-4, us-central-1.'],
       ['S3 Storage',                           id => /^S3S/.test(id)],
