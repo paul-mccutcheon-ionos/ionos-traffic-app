@@ -1263,31 +1263,39 @@
     card.style.display = '';
 
     // Group order matters — declared array preserves it. Each entry is
-    // [label, predicate, optional sub-note].
+    // [label, predicate, optional sub-note]. Labels match IONOS DCD
+    // terminology: "Contract-owned bucket" / "User-owned bucket".
     const groupDefs = [
-      ['Contract Traffic — Inbound',                 id => /^CTI/.test(id)],
-      ['Contract Traffic — Outbound',                id => /^CTO/.test(id)],
-      ['S3 Transfer — Contract-owned buckets',       id => /^S3T[IO]/.test(id),
+      ['Contract Traffic — Inbound',           id => /^CTI/.test(id)],
+      ['Contract Traffic — Outbound',          id => /^CTO/.test(id)],
+      ['S3 Transfer — Contract-owned buckets', id => /^S3T[IO]/.test(id),
         'Regions: eu-central-3, eu-central-4, us-central-1.'],
-      ['S3 Transfer — User-owned regions (incl. VDC traffic)', id => /^TI\d|^TO\d/.test(id),
-        'Regions: eu-central-1, eu-central-2, eu-south-2. IONOS does not expose user-owned bucket transfer with its own meter — these meters bundle user-owned bucket transfer together with VDC traffic for the region.'],
-      ['S3 Storage',                                 id => /^S3S/.test(id)],
-      ['S3 API Requests',                            id => /^S3A/.test(id)],
-      ['S3 Other',                                   id => /^S3/.test(id)],
-      ['Other',                                      () => true],
+      ['S3 Transfer — User-owned buckets',     id => /^TI\d|^TO\d/.test(id),
+        'Regions: eu-central-1, eu-central-2, eu-south-2. IONOS does not meter user-owned bucket transfer separately — these per-region meters bundle user-owned bucket transfer together with VDC traffic for the same region.'],
+      ['S3 Storage',                           id => /^S3S/.test(id)],
+      ['S3 API Requests',                      id => /^S3A/.test(id)],
     ];
 
     const ids = Object.keys(usage.meters).sort();
     const groups = new Map();
     const noteOf = new Map();
+    const unmatched = [];
     for (const id of ids) {
+      let matched = false;
       for (const [label, pred, note] of groupDefs) {
         if (pred(id)) {
           if (!groups.has(label)) { groups.set(label, []); if (note) noteOf.set(label, note); }
           groups.get(label).push(id);
+          matched = true;
           break;
         }
       }
+      if (!matched) unmatched.push(id);
+    }
+    if (unmatched.length) {
+      const label = 'Unrecognised meters';
+      groups.set(label, unmatched);
+      noteOf.set(label, 'Returned by /usage but not categorised by this app — please report so the labelling can be updated.');
     }
 
     let html = `<div class="meter-note" style="margin-bottom:0.75rem">
