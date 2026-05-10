@@ -1274,7 +1274,17 @@
       ['S3 API Requests',                      id => /^S3A/.test(id)],
     ];
 
-    const ids = Object.keys(usage.meters).sort();
+    // Meter IDs we want to always render even if the API hasn't reported a
+    // value yet, so the card is honest about which meters exist on this
+    // contract. Pre-seeded with quantity 0 so they show "0 1G" until data
+    // accumulates.
+    const alwaysShow = {
+      S3TI1000: { quantity: 0, unit: '1G', desc: '1 GB Object Storage inbound data transfer for user-owned buckets' },
+      S3TO1000: { quantity: 0, unit: '1G', desc: '1 GB Object Storage outbound data transfer for user-owned buckets' },
+    };
+    const merged = { ...alwaysShow, ...usage.meters };
+
+    const ids = Object.keys(merged).sort();
     const groups = new Map();
     const noteOf = new Map();
     const unmatched = [];
@@ -1306,7 +1316,7 @@
       if (note)
         html += `<div class="meter-note" style="margin:-0.4rem 0 0.5rem 0;font-size:0.78rem">${escHtml(note)}</div>`;
       for (const id of gIds) {
-        const m = usage.meters[id];
+        const m = merged[id];
         const q = (typeof m.quantity === 'number' ? m.quantity.toLocaleString(undefined, { maximumFractionDigits: 4 }) : m.quantity);
         html += `
           <div class="meter-row">
