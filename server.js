@@ -968,6 +968,66 @@ app.post('/api/s3-logging-status', async (req, res) => {
   res.json({ buckets });
 });
 
+app.post('/api/s3-osl-setup', async (req, res) => {
+  const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
+  const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
+  const { buckets, enable } = req.body;
+  if (!s3AccessKey || !s3SecretKey) return res.status(400).json({ error: 'S3 credentials not available.' });
+  if (!Array.isArray(buckets))      return res.status(400).json({ error: 'buckets must be an array.' });
+
+  // Group by region — one ionos-osl-{region} log bucket per region
+  const byRegion = {};
+  for (const b of buckets) {
+    if (!byRegion[b.regionCode]) byRegion[b.regionCode] = { endpoint: b.endpoint, list: [] };
+    byRegion[b.regionCode].list.push(b);
+  }
+
+  const results = [];
+  await Promise.allSettled(
+    Object.entries(byRegion).map(async ([regionCode, { endpoint, list }]) => {
+      const logBucketName = `ionos-osl-${regionCode}`;
+      const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode);
+      let logBucketCreated = false;
+
+      if (enable) {
+        try {
+          await withTimeout(s3.send(new HeadBucketCommand({ Bucket: logBucketName })), 5000);
+        } catch (_) {
+          try {
+            await withTimeout(s3.send(new CreateBucketCommand({ Bucket: logBucketName })), 10000);
+            logBucketCreated = true;
+          } catch (createErr) {
+            for (const b of list)
+              results.push({ name: b.name, status: 'error', error: `Log bucket creation failed: ${createErr.message}` });
+            return;
+          }
+        }
+      }
+
+      await Promise.allSettled(
+        list.map(async b => {
+          try {
+            await withTimeout(
+              s3.send(new PutBucketLoggingCommand({
+                Bucket: b.name,
+                BucketLoggingStatus: enable
+                  ? { LoggingEnabled: { TargetBucket: logBucketName, TargetPrefix: `${b.name}/` } }
+                  : {},
+              })),
+              8000
+            );
+            results.push({ name: b.name, status: enable ? 'activated' : 'deactivated', logBucket: logBucketName, logBucketCreated });
+          } catch (err) {
+            results.push({ name: b.name, status: 'error', error: err.message });
+          }
+        })
+      );
+    })
+  );
+
+  res.json({ results });
+});
+
 app.post('/api/s3-logging-set', async (req, res) => {
   const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
   const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
