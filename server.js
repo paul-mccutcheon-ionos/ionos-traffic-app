@@ -8,6 +8,7 @@ const zlib    = require('zlib');
 const { S3Client, CreateBucketCommand, HeadBucketCommand,
         ListBucketsCommand, ListObjectsV2Command, GetObjectCommand,
         GetBucketAclCommand, GetBucketLocationCommand,
+        PutBucketAclCommand,
         PutBucketLifecycleConfigurationCommand,
         GetBucketLifecycleConfigurationCommand,
         GetBucketLoggingCommand,
@@ -1077,6 +1078,20 @@ app.post('/api/s3-osl-setup', async (req, res) => {
               results.push({ name: b.name, status: 'error', error: `Log bucket creation failed: ${createErr.message}` });
             return;
           }
+        }
+
+        // Grant the IONOS LogDelivery group write + read-ACP on the log bucket.
+        // Without this the logging config is accepted but no logs are ever written.
+        try {
+          await withTimeout(s3.send(new PutBucketAclCommand({
+            Bucket:       logBucketName,
+            GrantWrite:   'URI=http://acs.amazonaws.com/groups/s3/LogDelivery',
+            GrantReadACP: 'URI=http://acs.amazonaws.com/groups/s3/LogDelivery',
+          })), 8000);
+        } catch (aclErr) {
+          for (const b of list)
+            results.push({ name: b.name, status: 'error', error: `Log bucket ACL grant failed: ${aclErr.message}` });
+          return;
         }
       }
 
