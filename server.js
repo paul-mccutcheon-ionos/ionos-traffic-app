@@ -487,16 +487,34 @@ app.post('/api/query-s3', async (req, res) => {
     .reduce((s, id) => s + (s3Meters[id]?.totalGB || 0), 0);
 
   const s3TotalsFromUsage = u => {
-    if (!u) return { inGB: 0, outGB: 0 };
+    if (!u) return null;
     const m = u.meters;
     return {
       inGB:  Math.round(((m.S3TI1000?.quantity || 0) + (m.S3TI2100?.quantity || 0) + (m.S3TI2200?.quantity || 0)) * 10000) / 10000,
       outGB: Math.round(((m.S3TO1000?.quantity || 0) + (m.S3TO2100?.quantity || 0) + (m.S3TO2200?.quantity || 0) + (m.S3TO2300?.quantity || 0)) * 10000) / 10000,
     };
   };
-  // Chart shows the queried period only. The /usage endpoint returns monthly
-  // totals; daily S3 granularity is not available from the IONOS billing API.
-  const history = [{ date: period, ...s3TotalsFromUsage(usage) }];
+
+  // Attempt per-day fetches: call /usage?period=YYYY-MM-DD for each day of
+  // the selected month. The API docs show YYYY-MM as the format but the
+  // response startDate/endDate have day components, suggesting daily periods
+  // may be accepted. Falls back to a single monthly bar if any day returns null.
+  const [py, pm] = period.split('-').map(Number);
+  const totalDays = new Date(py, pm, 0).getDate();
+  const dayPeriods = Array.from({ length: totalDays }, (_, i) =>
+    `${period}-${String(i + 1).padStart(2, '0')}`
+  );
+  const daySettled = await Promise.allSettled(
+    dayPeriods.map(dp => fetchContractUsage(contractId, token, dp))
+  );
+  const dailyRows = daySettled.map((r, i) => {
+    const totals = r.status === 'fulfilled' ? s3TotalsFromUsage(r.value) : null;
+    return totals ? { date: dayPeriods[i], ...totals } : null;
+  });
+  const hasDailyData = dailyRows.some(r => r !== null);
+  const history = hasDailyData
+    ? dailyRows.map((r, i) => r || { date: dayPeriods[i], inGB: 0, outGB: 0 })
+    : [{ date: period, ...(s3TotalsFromUsage(usage) || { inGB: 0, outGB: 0 }) }];
 
   res.json({
     s3Meters, trafficMeters,
@@ -505,8 +523,9 @@ app.post('/api/query-s3', async (req, res) => {
       outGB: Math.floor(s3OutGB * 10000) / 10000
     },
     allMeterIds: Array.from(apiMeters.keys()),
-    usage,  // { startDate, endDate, meters: { meterId: {quantity, unit, desc} } } or null
-    history // [{ date: 'YYYY-MM', inGB, outGB }, ...] — last 3 months + queried month
+    usage,
+    history,         // daily rows if API supports it, else single monthly bar
+    hasDailyData,    // tells the client which label to use
   });
 });
 
