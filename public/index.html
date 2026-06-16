@@ -792,7 +792,7 @@
     </div>
     <!-- S3 Monthly Chart -->
     <div class="card" id="s3-chart-card" style="display:none">
-      <h2>&#128200; S3 Monthly Traffic</h2>
+      <h2>&#128200; S3 Traffic — <span id="s3-chart-period"></span></h2>
       <div class="chart-container"><canvas id="s3-chart"></canvas></div>
     </div>
     <!-- S3 Projection -->
@@ -1744,9 +1744,10 @@
         lastQueryParams = { token, contractId, currentPeriod: period, targetIp: '', vdcQuery: '' };
         document.getElementById('s3-proj-result').innerHTML = '';
 
-        // Monthly trend chart
+        // Monthly traffic chart (queried period only — daily S3 data not available from API)
         const chartCard = document.getElementById('s3-chart-card');
         if (d.history && d.history.length) {
+          document.getElementById('s3-chart-period').textContent = period;
           chartCard.style.display = '';
           s3Chart = buildChart('s3-chart', s3Chart, d.history);
         } else {
