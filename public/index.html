@@ -1223,16 +1223,18 @@
   let rangeChart = null;
   let s3Chart    = null;
 
-  function buildChart(canvasId, chartRef, dates) {
+  function buildChart(canvasId, chartRef, dates, highlightIdx = -1) {
     const ctx = document.getElementById(canvasId).getContext('2d');
     if (chartRef) chartRef.destroy();
+    const mkIn  = i => highlightIdx < 0 || i === highlightIdx ? 'rgba(52,211,153,0.75)'  : 'rgba(52,211,153,0.28)';
+    const mkOut = i => highlightIdx < 0 || i === highlightIdx ? 'rgba(248,113,113,0.75)' : 'rgba(248,113,113,0.28)';
     return new Chart(ctx, {
       type: 'bar',
       data: {
         labels: dates.map(d => d.date),
         datasets: [
-          { label: 'Inbound (GB)',  data: dates.map(d => d.inGB),  backgroundColor: 'rgba(52,211,153,0.7)', borderColor: '#34d399', borderWidth: 1, borderRadius: 3 },
-          { label: 'Outbound (GB)', data: dates.map(d => d.outGB), backgroundColor: 'rgba(248,113,113,0.7)', borderColor: '#f87171', borderWidth: 1, borderRadius: 3 }
+          { label: 'Inbound (GB)',  data: dates.map(d => d.inGB),  backgroundColor: dates.map((_, i) => mkIn(i)),  borderColor: '#34d399', borderWidth: 1, borderRadius: 3 },
+          { label: 'Outbound (GB)', data: dates.map(d => d.outGB), backgroundColor: dates.map((_, i) => mkOut(i)), borderColor: '#f87171', borderWidth: 1, borderRadius: 3 }
         ]
       },
       options: {
@@ -1744,13 +1746,13 @@
         lastQueryParams = { token, contractId, currentPeriod: period, targetIp: '', vdcQuery: '' };
         document.getElementById('s3-proj-result').innerHTML = '';
 
-        // Traffic chart — daily if API returned per-day data, otherwise monthly total
+        // Monthly trend chart — queried month + 2 prior months; queried month highlighted
         const chartCard = document.getElementById('s3-chart-card');
         if (d.history && d.history.length) {
-          const label = d.hasDailyData ? 'Daily Traffic' : 'Monthly Traffic';
-          document.getElementById('s3-chart-period').textContent = `${period} — ${label}`;
+          document.getElementById('s3-chart-period').textContent = `${period} — Monthly Totals`;
           chartCard.style.display = '';
-          s3Chart = buildChart('s3-chart', s3Chart, d.history);
+          const hlIdx = d.history.findIndex(h => h.isQueried);
+          s3Chart = buildChart('s3-chart', s3Chart, d.history, hlIdx);
         } else {
           chartCard.style.display = 'none';
         }

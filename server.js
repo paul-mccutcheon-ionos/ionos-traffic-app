@@ -495,26 +495,22 @@ app.post('/api/query-s3', async (req, res) => {
     };
   };
 
-  // Attempt per-day fetches: call /usage?period=YYYY-MM-DD for each day of
-  // the selected month. The API docs show YYYY-MM as the format but the
-  // response startDate/endDate have day components, suggesting daily periods
-  // may be accepted. Falls back to a single monthly bar if any day returns null.
-  const [py, pm] = period.split('-').map(Number);
-  const totalDays = new Date(py, pm, 0).getDate();
-  const dayPeriods = Array.from({ length: totalDays }, (_, i) =>
-    `${period}-${String(i + 1).padStart(2, '0')}`
+  // IONOS /usage only provides monthly totals — YYYY-MM-DD period format returns
+  // 422 "Period invalid". Build a 3-month trend chart instead: 2 prior months
+  // plus the queried month (highlighted in the UI as the selected period).
+  const chartPeriods = getPreviousPeriods(period, 2).concat(period);
+  const chartSettled = await Promise.allSettled(
+    chartPeriods.map(p => fetchContractUsage(contractId, token, p))
   );
-  const daySettled = await Promise.allSettled(
-    dayPeriods.map(dp => fetchContractUsage(contractId, token, dp))
-  );
-  const dailyRows = daySettled.map((r, i) => {
+  const history = chartSettled.map((r, i) => {
     const totals = r.status === 'fulfilled' ? s3TotalsFromUsage(r.value) : null;
-    return totals ? { date: dayPeriods[i], ...totals } : null;
+    return {
+      date:      chartPeriods[i],
+      inGB:      totals?.inGB  ?? 0,
+      outGB:     totals?.outGB ?? 0,
+      isQueried: chartPeriods[i] === period,
+    };
   });
-  const hasDailyData = dailyRows.some(r => r !== null);
-  const history = hasDailyData
-    ? dailyRows.map((r, i) => r || { date: dayPeriods[i], inGB: 0, outGB: 0 })
-    : [{ date: period, ...(s3TotalsFromUsage(usage) || { inGB: 0, outGB: 0 }) }];
 
   res.json({
     s3Meters, trafficMeters,
@@ -524,8 +520,7 @@ app.post('/api/query-s3', async (req, res) => {
     },
     allMeterIds: Array.from(apiMeters.keys()),
     usage,
-    history,         // daily rows if API supports it, else single monthly bar
-    hasDailyData,    // tells the client which label to use
+    history,
   });
 });
 
