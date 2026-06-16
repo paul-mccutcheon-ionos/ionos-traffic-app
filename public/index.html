@@ -794,13 +794,7 @@
     <div class="card proj-card" id="s3-proj-card">
       <h2>📈 Next Month S3 Traffic Projection</h2>
       <div class="proj-controls">
-        <label style="font-size:0.85rem;color:#94a3b8;font-weight:500">Base projection on</label>
-        <select id="s3-proj-months" class="proj-months-sel">
-          <option value="2">last 2 months</option>
-          <option value="3" selected>last 3 months</option>
-          <option value="6">last 6 months</option>
-          <option value="12">last 12 months</option>
-        </select>
+        <span style="font-size:0.82rem;color:#64748b">Based on current month-to-date only &mdash; the IONOS billing API does not expose historical per-month S3 totals.</span>
         <button type="button" class="proj-btn" id="s3-proj-btn">
           <span id="s3-proj-label">Calculate Projection</span>
           <span class="browse-spinner" id="s3-proj-spinner"></span>
@@ -1742,7 +1736,7 @@
         renderLiveUsage('s3-live-usage-section', 's3-live-usage-card', d.usage);
 
         document.getElementById('s3-results').style.display = '';
-        document.getElementById('s3-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('s3-live-usage-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     } catch (err) {
       showError('Network error: ' + err.message);
