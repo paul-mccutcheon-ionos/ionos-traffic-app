@@ -129,12 +129,13 @@ async function getDatacenterIPs(datacenterId, token) {
 }
 
 // Hit /billing/{contractId}/usage — the only endpoint that exposes per-meter
-// S3 and CT totals. It is rolling current-period (no period parameter), and
-// aggregates across multiple "datacenters" (Region buckets + a synthetic
-// "Traffic" dc). Returns null if the endpoint fails (caller can ignore).
-async function fetchContractUsage(contractId, token) {
+// S3 totals. Accepts an optional period (YYYY-MM); defaults to the current
+// rolling month when omitted. Aggregates across all datacenters.
+// Returns null if the endpoint fails (caller can ignore).
+async function fetchContractUsage(contractId, token, period) {
   let data;
-  try { data = await billingGet(`/${encodeURIComponent(contractId)}/usage`, token); }
+  const qs = period ? `?period=${encodeURIComponent(period)}` : '';
+  try { data = await billingGet(`/${encodeURIComponent(contractId)}/usage${qs}`, token); }
   catch (_) { return null; }
   const agg = new Map();
   for (const dc of data?.datacenters || [])
@@ -458,7 +459,7 @@ app.post('/api/query-s3', async (req, res) => {
   try {
     [metersData, usage] = await Promise.all([
       billingGet(`/${encodeURIComponent(contractId)}/traffic/${encodeURIComponent(period)}`, token),
-      fetchContractUsage(contractId, token),
+      fetchContractUsage(contractId, token, period),
     ]);
   } catch (err) {
     return res.status(err.status || 502).json({ error: err.message });
@@ -581,13 +582,11 @@ async function fetchMonthlyTotals(mode, token, contractId, period, targetIp, vdc
     return { inGB: toGB2(inB), outGB: toGB2(outB) };
   }
   if (mode === 's3') {
-    const data   = await billingGet(
-      `/${encodeURIComponent(contractId)}/traffic/${encodeURIComponent(period)}`, token);
-    const meters = extractMeters(data);
-    const inGB   = ['S3TI2100','S3TI2200']
-      .reduce((s, id) => { const m = meters.get(id); return s + (m ? toGB4(m.totalBytes) : 0); }, 0);
-    const outGB  = ['S3TO2100','S3TO2200','S3TO2300']
-      .reduce((s, id) => { const m = meters.get(id); return s + (m ? toGB4(m.totalBytes) : 0); }, 0);
+    const usage = await fetchContractUsage(contractId, token, period);
+    if (!usage) return { inGB: 0, outGB: 0 };
+    const m = usage.meters;
+    const inGB  = (m.S3TI1000?.quantity || 0) + (m.S3TI2100?.quantity || 0) + (m.S3TI2200?.quantity || 0);
+    const outGB = (m.S3TO1000?.quantity || 0) + (m.S3TO2100?.quantity || 0) + (m.S3TO2200?.quantity || 0) + (m.S3TO2300?.quantity || 0);
     return { inGB: Math.round(inGB * 100) / 100, outGB: Math.round(outGB * 100) / 100 };
   }
   throw new Error('Unknown mode');
@@ -619,7 +618,7 @@ async function fetchCurrentMtd(mode, token, contractId, currentPeriod, targetIp,
     return { inGB: toGB2(inB), outGB: toGB2(outB), daysCovered: dateSet.size };
   }
   if (mode === 's3') {
-    const usage = await fetchContractUsage(contractId, token);
+    const usage = await fetchContractUsage(contractId, token, currentPeriod);
     if (!usage || !usage.startDate || !usage.endDate) return null;
     const m = usage.meters;
     const inGB  = (m.S3TI1000?.quantity || 0) + (m.S3TI2100?.quantity || 0) + (m.S3TI2200?.quantity || 0);
@@ -653,43 +652,6 @@ app.post('/api/project', async (req, res) => {
   const anchor     = currentCalendarMonth();             // e.g. "2026-05"
   const periods    = getPreviousPeriods(anchor, monthsInt); // last N complete months
   const nextPeriod = getNextPeriod(anchor);              // next calendar month
-
-  // S3 mode: /billing/{contract}/traffic never returns S3 meters, so the
-  // historical regression has nothing to fit. Use rolling MTD from /usage
-  // as a single-point estimate, annualized to a full month, and assume the
-  // run-rate continues into the next month.
-  if (mode === 's3') {
-    let mtd = null;
-    try { mtd = await fetchCurrentMtd('s3', token, contractId, anchor, null, null); }
-    catch (_) {}
-    if (!mtd || mtd.daysCovered <= 0) {
-      return res.json({
-        history: [],
-        projection: { period: nextPeriod, insufficient: true },
-        nextPeriod, s3MtdOnly: true,
-      });
-    }
-    const dim    = daysInMonth(anchor);
-    const factor = dim / mtd.daysCovered;
-    const annIn  = Math.round(mtd.inGB  * factor * 100) / 100;
-    const annOut = Math.round(mtd.outGB * factor * 100) / 100;
-    return res.json({
-      history: [{
-        period: anchor, inGB: annIn, outGB: annOut, ok: true, isMtd: true,
-        mtdInGB: mtd.inGB, mtdOutGB: mtd.outGB,
-        daysCovered: mtd.daysCovered, daysInMonth: dim,
-      }],
-      projection: {
-        period: nextPeriod,
-        inGB: annIn, outGB: annOut,
-        inTrendPct: 0, outTrendPct: 0,
-        inSlope: 0,   outSlope: 0,
-        dataPoints: 1,
-      },
-      nextPeriod,
-      s3MtdOnly: true,
-    });
-  }
 
   let vdcIpSet = null;
   if (mode === 'vdc') {

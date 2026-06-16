@@ -546,10 +546,7 @@
         <div class="form-group full-width" id="s3-field-group" style="display:none">
           <div class="field-note" style="font-size:0.85rem;color:#64748b;padding:0.5rem 0.75rem;background:#0a0e18;border-radius:8px;border-left:3px solid #1e3a5f">
             S3 Object Storage traffic is queried at contract level — no additional fields required.
-            The <strong style="color:#7dd3fc">Live Billing Meters</strong> section always shows the
-            <strong style="color:#7dd3fc">current rolling month-to-date</strong> from the
-            <code>/usage</code> endpoint regardless of the period selected above.
-            The period selector is used only for the historical traffic endpoint (which does not currently return S3 meter data).
+            Meter data is fetched from the IONOS Billing API for the selected period.
           </div>
         </div>
 
@@ -797,7 +794,13 @@
     <div class="card proj-card" id="s3-proj-card">
       <h2>📈 Next Month S3 Traffic Projection</h2>
       <div class="proj-controls">
-        <span style="font-size:0.82rem;color:#64748b">Based on current month-to-date only &mdash; the IONOS billing API does not expose historical per-month S3 totals.</span>
+        <label style="font-size:0.85rem;color:#94a3b8;font-weight:500">Base projection on</label>
+        <select id="s3-proj-months" class="proj-months-sel">
+          <option value="2">last 2 months</option>
+          <option value="3" selected>last 3 months</option>
+          <option value="6">last 6 months</option>
+          <option value="12">last 12 months</option>
+        </select>
         <button type="button" class="proj-btn" id="s3-proj-btn">
           <span id="s3-proj-label">Calculate Projection</span>
           <span class="browse-spinner" id="s3-proj-spinner"></span>
@@ -1612,8 +1615,7 @@
     document.getElementById('s3-summary-grid').innerHTML = `
       <div class="meter-note" style="grid-column:1/-1;margin:0 0 0.5rem 0">
         Rolling MTD: <strong style="color:#7dd3fc">${escHtml(range)}</strong>
-        &mdash; always the <em>current</em> billing period from <code>/usage</code>, not the period selected above.
-        Totals cover both bucket types: user-owned (legacy
+        &mdash; totals cover both bucket types: user-owned (legacy
         <code>S3TI1000</code>/<code>S3TO1000</code>) and contract-owned
         (<code>S3TI*</code>/<code>S3TO*</code> 2000-series). Both billed separately by IONOS.
       </div>
