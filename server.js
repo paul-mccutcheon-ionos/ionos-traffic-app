@@ -8,7 +8,9 @@ const zlib    = require('zlib');
 const { S3Client, CreateBucketCommand, HeadBucketCommand,
         ListBucketsCommand, ListObjectsV2Command, GetObjectCommand,
         PutBucketLifecycleConfigurationCommand,
-        GetBucketLifecycleConfigurationCommand } = require('@aws-sdk/client-s3');
+        GetBucketLifecycleConfigurationCommand,
+        GetBucketLoggingCommand,
+        PutBucketLoggingCommand } = require('@aws-sdk/client-s3');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -871,7 +873,7 @@ app.post('/api/s3-bucket-usage', async (req, res) => {
       const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
       const { Buckets = [] } = await withTimeout(s3.send(new ListBucketsCommand({})), 8000);
       const buckets = await Promise.allSettled(
-        Buckets.map(b => getBucketStorage(s3, b.Name).then(stats => ({ name: b.Name, region: label, ...stats })))
+        Buckets.map(b => getBucketStorage(s3, b.Name).then(stats => ({ name: b.Name, region: label, endpoint, regionCode: region, ...stats })))
       );
       return buckets.filter(r => r.status === 'fulfilled').map(r => r.value);
     })
@@ -883,6 +885,140 @@ app.post('/api/s3-bucket-usage', async (req, res) => {
     .sort((a, b) => b.totalBytes - a.totalBytes);
 
   res.json({ buckets });
+});
+
+// ── S3 Bucket Logging Management ─────────────────────────────────────────────
+
+function parseS3LogLine(line) {
+  // Standard S3 server access log: owner bucket [datetime] ip requester reqid op key "uri" status error bytesSent objSize ...
+  const parts = [];
+  let i = 0;
+  while (i < line.length) {
+    while (i < line.length && line[i] === ' ') i++;
+    if (i >= line.length) break;
+    let end, val;
+    if (line[i] === '"') {
+      end = line.indexOf('"', i + 1); if (end < 0) end = line.length - 1;
+      val = line.slice(i + 1, end); i = end + 1;
+    } else if (line[i] === '[') {
+      end = line.indexOf(']', i + 1); if (end < 0) end = line.length - 1;
+      val = line.slice(i + 1, end); i = end + 1;
+    } else {
+      end = line.indexOf(' ', i); if (end < 0) end = line.length;
+      val = line.slice(i, end); i = end;
+    }
+    parts.push(val);
+  }
+  if (parts.length < 13) return null;
+  const status = parseInt(parts[9]);
+  if (!status || status < 200 || status >= 300) return null;
+  return { bucket: parts[1], operation: parts[6], bytesSent: parseInt(parts[11]) || 0, objectSize: parseInt(parts[12]) || 0 };
+}
+
+app.post('/api/s3-logging-status', async (req, res) => {
+  const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
+  const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
+  if (!s3AccessKey || !s3SecretKey)
+    return res.status(400).json({ error: 'S3 credentials not available.' });
+
+  const regionResults = await Promise.allSettled(
+    S3_BUCKET_REGIONS.map(async ({ label, region, endpoint }) => {
+      const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
+      const { Buckets = [] } = await withTimeout(s3.send(new ListBucketsCommand({})), 8000);
+      const results = await Promise.allSettled(
+        Buckets.map(async b => {
+          try {
+            const r = await withTimeout(s3.send(new GetBucketLoggingCommand({ Bucket: b.Name })), 5000);
+            const enabled = !!(r.LoggingEnabled?.TargetBucket);
+            return { name: b.Name, region: label, endpoint, regionCode: region,
+              enabled, targetBucket: r.LoggingEnabled?.TargetBucket || '', targetPrefix: r.LoggingEnabled?.TargetPrefix || '' };
+          } catch (_) {
+            return { name: b.Name, region: label, endpoint, regionCode: region, enabled: false, targetBucket: '', targetPrefix: '' };
+          }
+        })
+      );
+      return results.filter(r => r.status === 'fulfilled').map(r => r.value);
+    })
+  );
+
+  const buckets = regionResults
+    .filter(r => r.status === 'fulfilled')
+    .flatMap(r => r.value)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  res.json({ buckets });
+});
+
+app.post('/api/s3-logging-set', async (req, res) => {
+  const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
+  const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
+  const { bucketName, endpoint, regionCode, enable, targetBucket, targetPrefix } = req.body;
+  if (!s3AccessKey || !s3SecretKey) return res.status(400).json({ error: 'S3 credentials not available.' });
+  if (!bucketName || !endpoint || !regionCode) return res.status(400).json({ error: 'Missing bucket/endpoint/region.' });
+
+  const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode);
+  try {
+    await withTimeout(
+      s3.send(new PutBucketLoggingCommand({
+        Bucket: bucketName,
+        BucketLoggingStatus: enable
+          ? { LoggingEnabled: { TargetBucket: targetBucket, TargetPrefix: targetPrefix || `${bucketName}/` } }
+          : {},
+      })),
+      8000
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/s3-bucket-traffic', async (req, res) => {
+  const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
+  const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
+  const { logBucket, endpoint, regionCode, buckets, period } = req.body;
+  if (!s3AccessKey || !s3SecretKey) return res.status(400).json({ error: 'S3 credentials not available.' });
+  if (!logBucket || !endpoint || !regionCode || !period || !Array.isArray(buckets))
+    return res.status(400).json({ error: 'Missing required fields.' });
+
+  const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode);
+  const traffic = {};
+
+  await Promise.allSettled(
+    buckets.map(async bucketName => {
+      let ct, keys = [];
+      do {
+        const resp = await withTimeout(
+          s3.send(new ListObjectsV2Command({ Bucket: logBucket, Prefix: `${bucketName}/${period}-`, MaxKeys: 1000, ContinuationToken: ct })),
+          8000
+        );
+        for (const o of resp.Contents || []) keys.push(o.Key);
+        ct = resp.NextContinuationToken;
+      } while (ct && keys.length < 5000);
+
+      if (!keys.length) return;
+
+      await Promise.allSettled(
+        keys.slice(0, 500).map(async key => {
+          const obj = await withTimeout(s3.send(new GetObjectCommand({ Bucket: logBucket, Key: key })), 10000);
+          const buf = await streamToBuffer(obj.Body);
+          for (const rawLine of buf.toString('utf8').split('\n')) {
+            const p = parseS3LogLine(rawLine.trim());
+            if (!p) continue;
+            const bkt = p.bucket;
+            if (!traffic[bkt]) traffic[bkt] = { inBytes: 0, outBytes: 0 };
+            if (p.operation === 'REST.GET.OBJECT') {
+              traffic[bkt].outBytes += p.bytesSent;
+            } else if (p.operation === 'REST.PUT.OBJECT' || p.operation === 'REST.COPY.OBJECT') {
+              traffic[bkt].inBytes += p.objectSize;
+            }
+          }
+        })
+      );
+    })
+  );
+
+  res.json({ traffic, period });
 });
 
 // ── Flow Logs ────────────────────────────────────────────────────────────────

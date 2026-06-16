@@ -797,8 +797,16 @@
     </div>
     <!-- S3 Bucket Storage -->
     <div class="card" id="s3-buckets-card" style="display:none">
-      <h2>&#129524; S3 Bucket Storage</h2>
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:0.75rem">
+        <h2 style="margin:0">&#129524; S3 Bucket Storage</h2>
+        <button type="button" id="s3-load-traffic-btn" style="display:none;font-size:0.78rem;padding:0.25rem 0.7rem;background:transparent;border:1px solid #334155;color:#94a3b8;border-radius:4px;cursor:pointer">&#128200; Load Traffic from Logs</button>
+      </div>
       <div id="s3-buckets-content"></div>
+    </div>
+    <!-- S3 Bucket Logging -->
+    <div class="card" id="s3-logging-card" style="display:none">
+      <h2>&#128221; S3 Bucket Access Logging</h2>
+      <div id="s3-logging-content"></div>
     </div>
     <!-- S3 Projection -->
     <div class="card proj-card" id="s3-proj-card">
@@ -1664,14 +1672,22 @@
                       : b >= 1024       ? (b / 1024).toFixed(1)     + ' KB'
                       : b + ' B';
 
-  function renderS3Buckets(data) {
+  let lastBucketData  = null;
+  let s3CurrentPeriod = '';
+  let s3LoggingState  = null;
+
+  function renderS3Buckets(data, trafficData) {
     const card    = document.getElementById('s3-buckets-card');
     const content = document.getElementById('s3-buckets-content');
     if (!data || !data.buckets || !data.buckets.length) { card.style.display = 'none'; return; }
+    lastBucketData = data;
     card.style.display = '';
+    const hasTraffic    = trafficData && Object.keys(trafficData).length > 0;
     const anyBucketCapped = data.buckets.some(b => b.capped);
-    const totalBytes   = data.buckets.reduce((s, b) => s + b.totalBytes,   0);
-    const totalObjects = data.buckets.reduce((s, b) => s + b.objectCount,  0);
+    const totalBytes    = data.buckets.reduce((s, b) => s + b.totalBytes,  0);
+    const totalObjects  = data.buckets.reduce((s, b) => s + b.objectCount, 0);
+    const totalIn  = hasTraffic ? data.buckets.reduce((s, b) => s + (trafficData[b.name]?.inBytes  || 0), 0) : null;
+    const totalOut = hasTraffic ? data.buckets.reduce((s, b) => s + (trafficData[b.name]?.outBytes || 0), 0) : null;
     content.innerHTML = `
       <div class="table-wrapper">
         <table>
@@ -1679,23 +1695,207 @@
             <th>Bucket</th><th>Region</th>
             <th style="text-align:right">Objects</th>
             <th style="text-align:right">Storage Used</th>
+            ${hasTraffic ? '<th style="text-align:right">Traffic In</th><th style="text-align:right">Traffic Out</th>' : ''}
           </tr></thead>
-          <tbody>${data.buckets.map(b => `<tr>
-            <td style="font-family:monospace;font-size:0.85rem">${escHtml(b.name)}</td>
-            <td>${escHtml(b.region)}</td>
-            <td style="text-align:right">${b.objectCount.toLocaleString()}${b.capped ? '+' : ''}</td>
-            <td style="text-align:right">${fmtBytes(b.totalBytes)}${b.capped ? '+' : ''}</td>
-          </tr>`).join('')}</tbody>
+          <tbody>${data.buckets.map(b => {
+            const td = hasTraffic ? trafficData[b.name] : null;
+            return `<tr>
+              <td style="font-family:monospace;font-size:0.85rem">${escHtml(b.name)}</td>
+              <td>${escHtml(b.region)}</td>
+              <td style="text-align:right">${b.objectCount.toLocaleString()}${b.capped ? '+' : ''}</td>
+              <td style="text-align:right">${fmtBytes(b.totalBytes)}${b.capped ? '+' : ''}</td>
+              ${hasTraffic ? `<td style="text-align:right;color:#34d399">${td ? fmtBytes(td.inBytes)  : '—'}</td>
+                              <td style="text-align:right;color:#f87171">${td ? fmtBytes(td.outBytes) : '—'}</td>` : ''}
+            </tr>`;
+          }).join('')}</tbody>
           <tfoot><tr style="border-top:1px solid #2d3348;font-weight:600">
             <td colspan="2">Total</td>
             <td style="text-align:right">${totalObjects.toLocaleString()}${anyBucketCapped ? '+' : ''}</td>
             <td style="text-align:right">${fmtBytes(totalBytes)}${anyBucketCapped ? '+' : ''}</td>
+            ${hasTraffic ? `<td style="text-align:right;color:#34d399">${totalIn !== null ? fmtBytes(totalIn) : '—'}</td>
+                            <td style="text-align:right;color:#f87171">${totalOut !== null ? fmtBytes(totalOut) : '—'}</td>` : ''}
           </tr></tfoot>
         </table>
       </div>
       ${anyBucketCapped ? '<p style="font-size:0.78rem;color:#64748b;margin-top:0.4rem">+ First 10,000 objects sampled per bucket — actual size may be larger.</p>' : ''}
+      ${hasTraffic ? '<p style="font-size:0.78rem;color:#64748b;margin-top:0.25rem">Traffic from access logs — inbound = PUT object sizes, outbound = GET bytes sent.</p>' : ''}
     `;
   }
+
+  function renderS3Logging(data) {
+    const card    = document.getElementById('s3-logging-card');
+    const content = document.getElementById('s3-logging-content');
+    if (!data || !data.buckets) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    s3LoggingState = data;
+
+    const allNames    = [...new Set(data.buckets.map(b => b.name))];
+    const enabledList = data.buckets.filter(b => b.enabled);
+    const logTargets  = [...new Set(enabledList.map(b => b.targetBucket).filter(Boolean))];
+    const defaultTarget = logTargets[0] || '';
+
+    const bucketOpts = allNames.map(n =>
+      `<option value="${escHtml(n)}"${n === defaultTarget ? ' selected' : ''}>${escHtml(n)}</option>`
+    ).join('');
+
+    const btnStyle = 'font-size:0.8rem;padding:0.3rem 0.75rem;border-radius:4px;cursor:pointer;border:1px solid';
+    content.innerHTML = `
+      <div style="display:flex;gap:0.75rem;align-items:flex-end;margin-bottom:1rem;flex-wrap:wrap">
+        <div>
+          <label style="font-size:0.78rem;color:#94a3b8;display:block;margin-bottom:0.3rem">Log target bucket</label>
+          <select id="s3-log-target-sel" style="background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:0.3rem 0.6rem;border-radius:4px;font-size:0.82rem;min-width:14rem">
+            <option value="">— select log bucket —</option>
+            ${bucketOpts}
+          </select>
+        </div>
+        <button type="button" id="s3-log-enable-all-btn" style="${btnStyle} #334155;color:#e2e8f0;background:#1e293b">Enable All</button>
+        <button type="button" id="s3-log-disable-all-btn" style="${btnStyle} #334155;color:#94a3b8;background:transparent">Disable All</button>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr>
+            <th>Bucket</th><th>Region</th><th>Logging</th><th>Log Target</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${data.buckets.map((b, i) => `
+              <tr id="s3-log-row-${i}">
+                <td style="font-family:monospace;font-size:0.85rem">${escHtml(b.name)}</td>
+                <td>${escHtml(b.region)}</td>
+                <td>${b.enabled
+                  ? '<span style="color:#4ade80;font-size:0.85rem">&#10004; Enabled</span>'
+                  : '<span style="color:#475569;font-size:0.85rem">Disabled</span>'}</td>
+                <td style="font-family:monospace;font-size:0.8rem;color:#7dd3fc">${escHtml(b.targetBucket || '—')}</td>
+                <td>
+                  <button type="button" class="s3-log-toggle" data-idx="${i}" data-enable="${b.enabled ? '0' : '1'}"
+                    style="font-size:0.75rem;padding:0.18rem 0.55rem;border-radius:3px;cursor:pointer;border:1px solid;
+                      ${b.enabled ? 'border-color:#f87171;color:#f87171;background:transparent' : 'border-color:#4ade80;color:#4ade80;background:transparent'}">
+                    ${b.enabled ? 'Disable' : 'Enable'}
+                  </button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:0.77rem;color:#475569;margin-top:0.75rem">
+        Logs are written to the target bucket with prefix <code style="color:#7dd3fc">{bucket-name}/</code>.
+        Use <em>Load Traffic from Logs</em> on the bucket storage card to aggregate traffic for the selected period.
+      </p>
+    `;
+
+    // Show/hide the "Load Traffic" button on the bucket card
+    const loadTrafficBtn = document.getElementById('s3-load-traffic-btn');
+    loadTrafficBtn.style.display = enabledList.length ? '' : 'none';
+    loadTrafficBtn.textContent = `\u{1F4C8} Load Traffic for ${s3CurrentPeriod} from Logs`;
+
+    // Per-bucket toggle
+    content.querySelectorAll('.s3-log-toggle').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const idx    = parseInt(btn.dataset.idx);
+        const enable = btn.dataset.enable === '1';
+        const bkt    = s3LoggingState.buckets[idx];
+        const target = document.getElementById('s3-log-target-sel').value;
+        if (enable && !target) { alert('Select a log target bucket first.'); return; }
+        btn.disabled = true; btn.textContent = '…';
+        try {
+          const r = await fetch('/api/s3-logging-set', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              s3AccessKey: flS3Creds.s3AccessKey || '', s3SecretKey: flS3Creds.s3SecretKey || '',
+              bucketName: bkt.name, endpoint: bkt.endpoint, regionCode: bkt.regionCode,
+              enable, targetBucket: target, targetPrefix: `${bkt.name}/`,
+            })
+          });
+          const d = await r.json();
+          if (!r.ok) { alert(d.error || `Error ${r.status}`); btn.disabled = false; btn.textContent = enable ? 'Enable' : 'Disable'; return; }
+          bkt.enabled      = enable;
+          bkt.targetBucket = enable ? target : '';
+          bkt.targetPrefix = enable ? `${bkt.name}/` : '';
+          renderS3Logging(s3LoggingState);
+        } catch (err) {
+          alert('Error: ' + err.message);
+          btn.disabled = false; btn.textContent = enable ? 'Enable' : 'Disable';
+        }
+      });
+    });
+
+    // Enable All
+    document.getElementById('s3-log-enable-all-btn').addEventListener('click', async () => {
+      const target = document.getElementById('s3-log-target-sel').value;
+      if (!target) { alert('Select a log target bucket first.'); return; }
+      const disabled = s3LoggingState.buckets.filter(b => !b.enabled);
+      if (!disabled.length) return;
+      const btn = document.getElementById('s3-log-enable-all-btn');
+      btn.disabled = true; btn.textContent = 'Enabling…';
+      for (const bkt of disabled) {
+        await fetch('/api/s3-logging-set', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            s3AccessKey: flS3Creds.s3AccessKey || '', s3SecretKey: flS3Creds.s3SecretKey || '',
+            bucketName: bkt.name, endpoint: bkt.endpoint, regionCode: bkt.regionCode,
+            enable: true, targetBucket: target, targetPrefix: `${bkt.name}/`,
+          })
+        }).catch(() => {});
+        bkt.enabled = true; bkt.targetBucket = target; bkt.targetPrefix = `${bkt.name}/`;
+      }
+      renderS3Logging(s3LoggingState);
+    });
+
+    // Disable All
+    document.getElementById('s3-log-disable-all-btn').addEventListener('click', async () => {
+      const enabled = s3LoggingState.buckets.filter(b => b.enabled);
+      if (!enabled.length) return;
+      const btn = document.getElementById('s3-log-disable-all-btn');
+      btn.disabled = true; btn.textContent = 'Disabling…';
+      for (const bkt of enabled) {
+        await fetch('/api/s3-logging-set', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            s3AccessKey: flS3Creds.s3AccessKey || '', s3SecretKey: flS3Creds.s3SecretKey || '',
+            bucketName: bkt.name, endpoint: bkt.endpoint, regionCode: bkt.regionCode, enable: false,
+          })
+        }).catch(() => {});
+        bkt.enabled = false; bkt.targetBucket = ''; bkt.targetPrefix = '';
+      }
+      renderS3Logging(s3LoggingState);
+    });
+  }
+
+  // ── S3 Load Traffic button ───────────────────────────────────────────────────
+
+  document.getElementById('s3-load-traffic-btn').addEventListener('click', async () => {
+    if (!s3LoggingState || !lastBucketData) return;
+    const enabledBuckets = s3LoggingState.buckets.filter(b => b.enabled && b.targetBucket);
+    if (!enabledBuckets.length) { alert('No buckets have logging enabled.'); return; }
+
+    // Use the most common target bucket as the log source
+    const targetCount = {};
+    enabledBuckets.forEach(b => { targetCount[b.targetBucket] = (targetCount[b.targetBucket] || 0) + 1; });
+    const logBucketName = Object.entries(targetCount).sort((a, b) => b[1] - a[1])[0][0];
+    const logBucketInfo = s3LoggingState.buckets.find(b => b.name === logBucketName);
+    if (!logBucketInfo) { alert(`Log bucket "${logBucketName}" not found.`); return; }
+
+    const btn = document.getElementById('s3-load-traffic-btn');
+    btn.disabled = true; btn.textContent = '⏳ Reading logs…';
+    try {
+      const r = await fetch('/api/s3-bucket-traffic', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          s3AccessKey: flS3Creds.s3AccessKey || '', s3SecretKey: flS3Creds.s3SecretKey || '',
+          logBucket: logBucketName, endpoint: logBucketInfo.endpoint, regionCode: logBucketInfo.regionCode,
+          buckets: enabledBuckets.map(b => b.name),
+          period: s3CurrentPeriod,
+        })
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || `Error ${r.status}`); return; }
+      renderS3Buckets(lastBucketData, d.traffic);
+    } catch (err) {
+      alert('Error loading traffic: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = `\u{1F4C8} Load Traffic for ${s3CurrentPeriod} from Logs`;
+    }
+  });
 
   // ── Form submit ─────────────────────────────────────────────────────────────
 
@@ -1777,16 +1977,31 @@
         showFlowLogsCard(vdcQuery, token, document.getElementById('vdcQuery').value.trim());
 
       } else if (mode === 's3') {
-        // Start bucket fetch in background immediately — don't await it here
+        s3CurrentPeriod = period;
+        lastBucketData  = null;
+        s3LoggingState  = null;
+
+        const s3Creds = { s3AccessKey: flS3Creds.s3AccessKey || '', s3SecretKey: flS3Creds.s3SecretKey || '' };
+
+        // Start both background fetches immediately
         const bucketFetch = fetch('/api/s3-bucket-usage', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ s3AccessKey: flS3Creds.s3AccessKey || '', s3SecretKey: flS3Creds.s3SecretKey || '' })
+          body: JSON.stringify(s3Creds)
         }).then(r => r.ok ? r.json() : null).catch(() => null);
 
-        // Show bucket card with loading state right away
+        const loggingFetch = fetch('/api/s3-logging-status', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(s3Creds)
+        }).then(r => r.ok ? r.json() : null).catch(() => null);
+
+        // Show loading states
         document.getElementById('s3-buckets-card').style.display = '';
         document.getElementById('s3-buckets-content').innerHTML =
           '<p style="color:#64748b;font-size:0.88rem;padding:0.5rem 0">&#9203; Loading bucket data&hellip;</p>';
+        document.getElementById('s3-load-traffic-btn').style.display = 'none';
+        document.getElementById('s3-logging-card').style.display = '';
+        document.getElementById('s3-logging-content').innerHTML =
+          '<p style="color:#64748b;font-size:0.88rem;padding:0.5rem 0">&#9203; Loading logging status&hellip;</p>';
 
         // Await main billing query
         const mainResp = await fetch('/api/query-s3', {
@@ -1818,13 +2033,23 @@
         document.getElementById('s3-results').style.display = '';
         document.getElementById('s3-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-        // Update bucket card when background fetch completes (non-blocking)
+        // Update bucket card when background fetch completes
         bucketFetch.then(bucketData => {
           if (!bucketData) {
             document.getElementById('s3-buckets-content').innerHTML =
               '<p style="color:#f87171;font-size:0.88rem;padding:0.5rem 0">&#9888; Could not load bucket data.</p>';
           } else {
             renderS3Buckets(bucketData);
+          }
+        });
+
+        // Update logging card when logging status fetch completes
+        loggingFetch.then(loggingData => {
+          if (!loggingData) {
+            document.getElementById('s3-logging-content').innerHTML =
+              '<p style="color:#f87171;font-size:0.88rem;padding:0.5rem 0">&#9888; Could not load logging status.</p>';
+          } else {
+            renderS3Logging(loggingData);
           }
         });
       }
