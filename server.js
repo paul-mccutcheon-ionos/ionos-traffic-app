@@ -6,7 +6,7 @@ const bcrypt  = require('bcryptjs');
 const dns     = require('dns').promises;
 const zlib    = require('zlib');
 const { S3Client, CreateBucketCommand, HeadBucketCommand,
-        ListObjectsV2Command, GetObjectCommand,
+        ListBucketsCommand, ListObjectsV2Command, GetObjectCommand,
         PutBucketLifecycleConfigurationCommand,
         GetBucketLifecycleConfigurationCommand } = require('@aws-sdk/client-s3');
 
@@ -830,6 +830,54 @@ app.post('/api/query-range', async (req, res) => {
   }
 
   res.json({ monthlyData, totals: { inGB: totalInGB, outGB: totalOutGB }, vdcName, vdcUUID, mode, dailyData });
+});
+
+// ── S3 Bucket Storage ────────────────────────────────────────────────────────
+
+async function getBucketStorage(s3, bucketName) {
+  let totalBytes = 0, objectCount = 0, capped = false;
+  let continuationToken;
+  const CAP = 100000;
+  do {
+    const resp = await s3.send(new ListObjectsV2Command({
+      Bucket: bucketName, MaxKeys: 1000, ContinuationToken: continuationToken,
+    }));
+    for (const obj of resp.Contents || []) { totalBytes += obj.Size || 0; objectCount++; }
+    if (objectCount >= CAP) { capped = true; break; }
+    continuationToken = resp.NextContinuationToken;
+  } while (continuationToken);
+  return { totalBytes, objectCount, capped };
+}
+
+const S3_BUCKET_REGIONS = [
+  { label: 'Frankfurt', region: 'eu-central-1', endpoint: 'https://s3.eu-central-1.ionoscloud.com' },
+  { label: 'Berlin',    region: 'eu-central-2', endpoint: 'https://s3.eu-central-2.ionoscloud.com' },
+  { label: 'Logroño',   region: 'eu-south-2',   endpoint: 'https://s3.eu-south-2.ionoscloud.com'   },
+  { label: 'Lenexa',    region: 'us-central-1', endpoint: 'https://s3.us-central-1.ionoscloud.com' },
+];
+
+app.post('/api/s3-bucket-usage', async (req, res) => {
+  const { s3AccessKey, s3SecretKey } = req.body;
+  if (!s3AccessKey || !s3SecretKey)
+    return res.status(400).json({ error: 's3AccessKey and s3SecretKey are required.' });
+
+  const regionResults = await Promise.allSettled(
+    S3_BUCKET_REGIONS.map(async ({ label, region, endpoint }) => {
+      const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
+      const { Buckets = [] } = await s3.send(new ListBucketsCommand({}));
+      const buckets = await Promise.allSettled(
+        Buckets.map(b => getBucketStorage(s3, b.Name).then(stats => ({ name: b.Name, region: label, ...stats })))
+      );
+      return buckets.filter(r => r.status === 'fulfilled').map(r => r.value);
+    })
+  );
+
+  const buckets = regionResults
+    .filter(r => r.status === 'fulfilled')
+    .flatMap(r => r.value)
+    .sort((a, b) => b.totalBytes - a.totalBytes);
+
+  res.json({ buckets });
 });
 
 // ── Flow Logs ────────────────────────────────────────────────────────────────

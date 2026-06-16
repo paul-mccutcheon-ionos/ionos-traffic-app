@@ -795,6 +795,11 @@
       <h2>&#128200; S3 Traffic — <span id="s3-chart-period"></span></h2>
       <div class="chart-container"><canvas id="s3-chart"></canvas></div>
     </div>
+    <!-- S3 Bucket Storage -->
+    <div class="card" id="s3-buckets-card" style="display:none">
+      <h2>&#129524; S3 Bucket Storage</h2>
+      <div id="s3-buckets-content"></div>
+    </div>
     <!-- S3 Projection -->
     <div class="card proj-card" id="s3-proj-card">
       <h2>📈 Next Month S3 Traffic Projection</h2>
@@ -1654,6 +1659,43 @@
       </div>`;
   }
 
+  function fmtBytes(b) {
+    if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
+    if (b >= 1048576)    return (b / 1048576).toFixed(1) + ' MB';
+    if (b >= 1024)       return (b / 1024).toFixed(1) + ' KB';
+    return b + ' B';
+  }
+
+  function renderS3Buckets(data) {
+    const card    = document.getElementById('s3-buckets-card');
+    const content = document.getElementById('s3-buckets-content');
+    if (!data || !data.buckets || !data.buckets.length) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    const totalBytes   = data.buckets.reduce((s, b) => s + b.totalBytes,   0);
+    const totalObjects = data.buckets.reduce((s, b) => s + b.objectCount,  0);
+    content.innerHTML = `
+      <div class="table-wrapper">
+        <table>
+          <thead><tr>
+            <th>Bucket</th><th>Region</th>
+            <th style="text-align:right">Objects</th>
+            <th style="text-align:right">Storage Used</th>
+          </tr></thead>
+          <tbody>${data.buckets.map(b => `<tr>
+            <td style="font-family:monospace;font-size:0.85rem">${escHtml(b.name)}</td>
+            <td>${escHtml(b.region)}</td>
+            <td style="text-align:right">${b.objectCount.toLocaleString()}${b.capped ? '+' : ''}</td>
+            <td style="text-align:right">${fmtBytes(b.totalBytes)}</td>
+          </tr>`).join('')}</tbody>
+          <tfoot><tr style="border-top:1px solid #2d3348;font-weight:600">
+            <td colspan="2">Total</td>
+            <td style="text-align:right">${totalObjects.toLocaleString()}</td>
+            <td style="text-align:right">${fmtBytes(totalBytes)}</td>
+          </tr></tfoot>
+        </table>
+      </div>`;
+  }
+
   // ── Form submit ─────────────────────────────────────────────────────────────
 
   document.getElementById('query-form').addEventListener('submit', async e => {
@@ -1734,12 +1776,21 @@
         showFlowLogsCard(vdcQuery, token, document.getElementById('vdcQuery').value.trim());
 
       } else if (mode === 's3') {
-        const r = await fetch('/api/query-s3', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token, contractId, period })
-        });
-        const d = await r.json();
-        if (!r.ok) { showError(d.error || `Error ${r.status}`); return; }
+        // Fire main query and bucket storage lookup in parallel
+        const [mainResp, bucketData] = await Promise.all([
+          fetch('/api/query-s3', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, contractId, period })
+          }),
+          (flS3Creds.s3AccessKey && flS3Creds.s3SecretKey)
+            ? fetch('/api/s3-bucket-usage', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ s3AccessKey: flS3Creds.s3AccessKey, s3SecretKey: flS3Creds.s3SecretKey })
+              }).then(r => r.ok ? r.json() : null).catch(() => null)
+            : Promise.resolve(null)
+        ]);
+        const d = await mainResp.json();
+        if (!mainResp.ok) { showError(d.error || `Error ${mainResp.status}`); return; }
 
         const market = MARKETS[marketKey] || MARKETS.EU;
         renderS3Summary(d.usage, ratePerGB, market);
@@ -1756,6 +1807,9 @@
         } else {
           chartCard.style.display = 'none';
         }
+
+        // Per-bucket storage breakdown
+        renderS3Buckets(bucketData);
 
         // Live billing meters
         renderLiveUsage('s3-live-usage-section', 's3-live-usage-card', d.usage);
