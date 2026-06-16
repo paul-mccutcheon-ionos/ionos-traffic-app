@@ -1256,7 +1256,7 @@
     const card = document.getElementById(cardId);
     const section = document.getElementById(containerId);
     if (!card || !section) return;
-    if (!usage || !usage.meters || !Object.keys(usage.meters).length) {
+    if (!usage) {
       card.style.display = 'none';
       return;
     }
