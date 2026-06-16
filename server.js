@@ -622,8 +622,8 @@ async function fetchCurrentMtd(mode, token, contractId, currentPeriod, targetIp,
     const usage = await fetchContractUsage(contractId, token);
     if (!usage || !usage.startDate || !usage.endDate) return null;
     const m = usage.meters;
-    const inGB  = (m.S3TI2100?.quantity || 0) + (m.S3TI2200?.quantity || 0);
-    const outGB = (m.S3TO2100?.quantity || 0) + (m.S3TO2200?.quantity || 0) + (m.S3TO2300?.quantity || 0);
+    const inGB  = (m.S3TI1000?.quantity || 0) + (m.S3TI2100?.quantity || 0) + (m.S3TI2200?.quantity || 0);
+    const outGB = (m.S3TO1000?.quantity || 0) + (m.S3TO2100?.quantity || 0) + (m.S3TO2200?.quantity || 0) + (m.S3TO2300?.quantity || 0);
     const days  = Math.round((new Date(usage.endDate) - new Date(usage.startDate)) / 86400000) + 1;
     if (days <= 0) return null;
     return { inGB, outGB, daysCovered: days };
