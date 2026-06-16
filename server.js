@@ -1071,7 +1071,11 @@ app.post('/api/s3-osl-setup', async (req, res) => {
           await withTimeout(s3.send(new HeadBucketCommand({ Bucket: logBucketName })), 5000);
         } catch (_) {
           try {
-            await withTimeout(s3.send(new CreateBucketCommand({ Bucket: logBucketName })), 10000);
+            // AWS SDK v3 injects LocationConstraint for any region != us-east-1.
+            // IONOS S3 determines location from the endpoint URL and rejects the
+            // conflicting header, so create with us-east-1 to suppress it.
+            const s3Create = makeS3(s3AccessKey, s3SecretKey, endpoint, 'us-east-1');
+            await withTimeout(s3Create.send(new CreateBucketCommand({ Bucket: logBucketName })), 10000);
             logBucketCreated = true;
           } catch (createErr) {
             for (const b of list)
