@@ -7,6 +7,7 @@ const dns     = require('dns').promises;
 const zlib    = require('zlib');
 const { S3Client, CreateBucketCommand, HeadBucketCommand,
         ListBucketsCommand, ListObjectsV2Command, GetObjectCommand,
+        GetBucketAclCommand,
         PutBucketLifecycleConfigurationCommand,
         GetBucketLifecycleConfigurationCommand,
         GetBucketLoggingCommand,
@@ -871,9 +872,24 @@ app.post('/api/s3-bucket-usage', async (req, res) => {
   const regionResults = await Promise.allSettled(
     S3_BUCKET_REGIONS.map(async ({ label, region, endpoint }) => {
       const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
-      const { Buckets = [] } = await withTimeout(s3.send(new ListBucketsCommand({})), 8000);
+      const listResp = await withTimeout(s3.send(new ListBucketsCommand({})), 8000);
+      const { Buckets = [] } = listResp;
+      const authOwnerId = listResp.Owner?.ID || '';
+
       const buckets = await Promise.allSettled(
-        Buckets.map(b => getBucketStorage(s3, b.Name).then(stats => ({ name: b.Name, region: label, endpoint, regionCode: region, ...stats })))
+        Buckets.map(async b => {
+          const [storageResult, aclResult] = await Promise.allSettled([
+            getBucketStorage(s3, b.Name),
+            withTimeout(s3.send(new GetBucketAclCommand({ Bucket: b.Name })), 5000),
+          ]);
+          const stats = storageResult.status === 'fulfilled' ? storageResult.value : { totalBytes: 0, objectCount: 0, capped: false };
+          let ownerType = 'unknown';
+          if (aclResult.status === 'fulfilled') {
+            const bucketOwnerId = aclResult.value.Owner?.ID || '';
+            ownerType = (authOwnerId && bucketOwnerId) ? (bucketOwnerId === authOwnerId ? 'user' : 'contract') : 'user';
+          }
+          return { name: b.Name, region: label, endpoint, regionCode: region, ownerType, ...stats };
+        })
       );
       return buckets.filter(r => r.status === 'fulfilled').map(r => r.value);
     })
@@ -924,17 +940,20 @@ app.post('/api/s3-logging-status', async (req, res) => {
   const regionResults = await Promise.allSettled(
     S3_BUCKET_REGIONS.map(async ({ label, region, endpoint }) => {
       const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
-      const { Buckets = [] } = await withTimeout(s3.send(new ListBucketsCommand({})), 8000);
+      const listResp = await withTimeout(s3.send(new ListBucketsCommand({})), 8000);
+      const { Buckets = [] } = listResp;
+      const authOwnerId = listResp.Owner?.ID || '';
       const results = await Promise.allSettled(
         Buckets.map(async b => {
-          try {
-            const r = await withTimeout(s3.send(new GetBucketLoggingCommand({ Bucket: b.Name })), 5000);
-            const enabled = !!(r.LoggingEnabled?.TargetBucket);
-            return { name: b.Name, region: label, endpoint, regionCode: region,
-              enabled, targetBucket: r.LoggingEnabled?.TargetBucket || '', targetPrefix: r.LoggingEnabled?.TargetPrefix || '' };
-          } catch (_) {
-            return { name: b.Name, region: label, endpoint, regionCode: region, enabled: false, targetBucket: '', targetPrefix: '' };
-          }
+          const [logResult, aclResult] = await Promise.allSettled([
+            withTimeout(s3.send(new GetBucketLoggingCommand({ Bucket: b.Name })), 5000),
+            withTimeout(s3.send(new GetBucketAclCommand({ Bucket: b.Name })), 5000),
+          ]);
+          const enabled = logResult.status === 'fulfilled' ? !!(logResult.value.LoggingEnabled?.TargetBucket) : false;
+          const bucketOwnerId = aclResult.status === 'fulfilled' ? (aclResult.value.Owner?.ID || '') : '';
+          const ownerType = (authOwnerId && bucketOwnerId) ? (bucketOwnerId === authOwnerId ? 'user' : 'contract') : 'user';
+          return { name: b.Name, region: label, endpoint, regionCode: region, ownerType,
+            enabled, targetBucket: logResult.value?.LoggingEnabled?.TargetBucket || '', targetPrefix: logResult.value?.LoggingEnabled?.TargetPrefix || '' };
         })
       );
       return results.filter(r => r.status === 'fulfilled').map(r => r.value);

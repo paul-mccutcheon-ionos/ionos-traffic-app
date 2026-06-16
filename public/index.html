@@ -1688,11 +1688,14 @@
     const totalObjects  = data.buckets.reduce((s, b) => s + b.objectCount, 0);
     const totalIn  = hasTraffic ? data.buckets.reduce((s, b) => s + (trafficData[b.name]?.inBytes  || 0), 0) : null;
     const totalOut = hasTraffic ? data.buckets.reduce((s, b) => s + (trafficData[b.name]?.outBytes || 0), 0) : null;
+    const ownerBadge = t => t === 'user'     ? '<span style="font-size:0.75rem;color:#6ee7b7;background:rgba(110,231,183,0.1);padding:0.1rem 0.4rem;border-radius:3px;border:1px solid rgba(110,231,183,0.3)">User</span>'
+                          : t === 'contract' ? '<span style="font-size:0.75rem;color:#7dd3fc;background:rgba(125,211,252,0.1);padding:0.1rem 0.4rem;border-radius:3px;border:1px solid rgba(125,211,252,0.3)">Contract</span>'
+                          :                   '<span style="font-size:0.75rem;color:#64748b">—</span>';
     content.innerHTML = `
       <div class="table-wrapper">
         <table>
           <thead><tr>
-            <th>Bucket</th><th>Region</th>
+            <th>Bucket</th><th>Region</th><th>Type</th>
             <th style="text-align:right">Objects</th>
             <th style="text-align:right">Storage Used</th>
             ${hasTraffic ? '<th style="text-align:right">Traffic In</th><th style="text-align:right">Traffic Out</th>' : ''}
@@ -1702,6 +1705,7 @@
             return `<tr>
               <td style="font-family:monospace;font-size:0.85rem">${escHtml(b.name)}</td>
               <td>${escHtml(b.region)}</td>
+              <td>${ownerBadge(b.ownerType)}</td>
               <td style="text-align:right">${b.objectCount.toLocaleString()}${b.capped ? '+' : ''}</td>
               <td style="text-align:right">${fmtBytes(b.totalBytes)}${b.capped ? '+' : ''}</td>
               ${hasTraffic ? `<td style="text-align:right;color:#34d399">${td ? fmtBytes(td.inBytes)  : '—'}</td>
@@ -1709,7 +1713,7 @@
             </tr>`;
           }).join('')}</tbody>
           <tfoot><tr style="border-top:1px solid #2d3348;font-weight:600">
-            <td colspan="2">Total</td>
+            <td colspan="3">Total</td>
             <td style="text-align:right">${totalObjects.toLocaleString()}${anyBucketCapped ? '+' : ''}</td>
             <td style="text-align:right">${fmtBytes(totalBytes)}${anyBucketCapped ? '+' : ''}</td>
             ${hasTraffic ? `<td style="text-align:right;color:#34d399">${totalIn !== null ? fmtBytes(totalIn) : '—'}</td>
@@ -1754,25 +1758,32 @@
       <div class="table-wrapper">
         <table>
           <thead><tr>
-            <th>Bucket</th><th>Region</th><th>Logging</th><th>Log Target</th><th></th>
+            <th>Bucket</th><th>Region</th><th>Type</th><th>Logging</th><th>Log Target</th><th></th>
           </tr></thead>
           <tbody>
-            ${data.buckets.map((b, i) => `
-              <tr id="s3-log-row-${i}">
+            ${data.buckets.map((b, i) => {
+              const isUser = b.ownerType !== 'contract';
+              const typeBadge = b.ownerType === 'contract'
+                ? '<span style="font-size:0.75rem;color:#7dd3fc;background:rgba(125,211,252,0.1);padding:0.1rem 0.4rem;border-radius:3px;border:1px solid rgba(125,211,252,0.3)">Contract</span>'
+                : '<span style="font-size:0.75rem;color:#6ee7b7;background:rgba(110,231,183,0.1);padding:0.1rem 0.4rem;border-radius:3px;border:1px solid rgba(110,231,183,0.3)">User</span>';
+              const toggleBtn = isUser
+                ? `<button type="button" class="s3-log-toggle" data-idx="${i}" data-enable="${b.enabled ? '0' : '1'}"
+                    style="font-size:0.75rem;padding:0.18rem 0.55rem;border-radius:3px;cursor:pointer;border:1px solid;
+                      ${b.enabled ? 'border-color:#f87171;color:#f87171;background:transparent' : 'border-color:#4ade80;color:#4ade80;background:transparent'}">
+                    ${b.enabled ? 'Disable' : 'Enable'}
+                  </button>`
+                : `<span style="font-size:0.75rem;color:#475569">N/A</span>`;
+              return `<tr id="s3-log-row-${i}">
                 <td style="font-family:monospace;font-size:0.85rem">${escHtml(b.name)}</td>
                 <td>${escHtml(b.region)}</td>
+                <td>${typeBadge}</td>
                 <td>${b.enabled
                   ? '<span style="color:#4ade80;font-size:0.85rem">&#10004; Enabled</span>'
                   : '<span style="color:#475569;font-size:0.85rem">Disabled</span>'}</td>
                 <td style="font-family:monospace;font-size:0.8rem;color:#7dd3fc">${escHtml(b.targetBucket || '—')}</td>
-                <td>
-                  <button type="button" class="s3-log-toggle" data-idx="${i}" data-enable="${b.enabled ? '0' : '1'}"
-                    style="font-size:0.75rem;padding:0.18rem 0.55rem;border-radius:3px;cursor:pointer;border:1px solid;
-                      ${b.enabled ? 'border-color:#f87171;color:#f87171;background:transparent' : 'border-color:#4ade80;color:#4ade80;background:transparent'}">
-                    ${b.enabled ? 'Disable' : 'Enable'}
-                  </button>
-                </td>
-              </tr>`).join('')}
+                <td>${toggleBtn}</td>
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -1822,7 +1833,7 @@
     document.getElementById('s3-log-enable-all-btn').addEventListener('click', async () => {
       const target = document.getElementById('s3-log-target-sel').value;
       if (!target) { alert('Select a log target bucket first.'); return; }
-      const disabled = s3LoggingState.buckets.filter(b => !b.enabled);
+      const disabled = s3LoggingState.buckets.filter(b => !b.enabled && b.ownerType !== 'contract');
       if (!disabled.length) return;
       const btn = document.getElementById('s3-log-enable-all-btn');
       btn.disabled = true; btn.textContent = 'Enabling…';
