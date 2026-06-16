@@ -884,17 +884,32 @@ app.post('/api/s3-bucket-usage', async (req, res) => {
   if (!s3AccessKey || !s3SecretKey)
     return res.status(400).json({ error: 'S3 credentials not available.' });
 
-  // IONOS S3 ListBuckets is global — query once from the primary endpoint to
-  // avoid duplicates that arise from calling all 4 regional endpoints.
-  const s3Primary = makeS3(s3AccessKey, s3SecretKey, S3_PRIMARY.endpoint, S3_PRIMARY.region);
-  let listResp;
-  try {
-    listResp = await withTimeout(s3Primary.send(new ListBucketsCommand({})), 8000);
-  } catch (err) {
-    return res.status(502).json({ error: `S3 list failed: ${err.message}` });
+  // Query all regions in parallel and deduplicate by bucket name.
+  // IONOS S3 ListBuckets may behave regionally (different bucket sets per endpoint),
+  // so querying all 4 and deduplicating ensures contract-owned and cross-region
+  // buckets are not missed.
+  const regionListResults = await Promise.allSettled(
+    S3_BUCKET_REGIONS.map(async ({ endpoint, region }) => {
+      const s3r = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
+      const lr = await withTimeout(s3r.send(new ListBucketsCommand({})), 8000);
+      return { lr };
+    })
+  );
+  if (regionListResults.every(r => r.status === 'rejected'))
+    return res.status(502).json({ error: 'S3 list failed on all regions.' });
+
+  let authOwnerId = '';
+  const seenNames = new Map();
+  for (const r of regionListResults) {
+    if (r.status !== 'fulfilled') continue;
+    const { lr } = r.value;
+    if (!authOwnerId && lr.Owner?.ID) authOwnerId = lr.Owner.ID;
+    for (const b of lr.Buckets || []) {
+      if (!seenNames.has(b.Name)) seenNames.set(b.Name, b);
+    }
   }
-  const { Buckets = [] } = listResp;
-  const authOwnerId = listResp.Owner?.ID || '';
+  const Buckets = Array.from(seenNames.values());
+  const s3Primary = makeS3(s3AccessKey, s3SecretKey, S3_PRIMARY.endpoint, S3_PRIMARY.region);
 
   const settled = await Promise.allSettled(
     Buckets.map(async b => {
@@ -982,15 +997,28 @@ app.post('/api/s3-logging-status', async (req, res) => {
   if (!s3AccessKey || !s3SecretKey)
     return res.status(400).json({ error: 'S3 credentials not available.' });
 
-  const s3Primary = makeS3(s3AccessKey, s3SecretKey, S3_PRIMARY.endpoint, S3_PRIMARY.region);
-  let listResp;
-  try {
-    listResp = await withTimeout(s3Primary.send(new ListBucketsCommand({})), 8000);
-  } catch (err) {
-    return res.status(502).json({ error: `S3 list failed: ${err.message}` });
+  const regionListResults2 = await Promise.allSettled(
+    S3_BUCKET_REGIONS.map(async ({ endpoint, region }) => {
+      const s3r = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
+      const lr = await withTimeout(s3r.send(new ListBucketsCommand({})), 8000);
+      return { lr };
+    })
+  );
+  if (regionListResults2.every(r => r.status === 'rejected'))
+    return res.status(502).json({ error: 'S3 list failed on all regions.' });
+
+  let authOwnerId = '';
+  const seenNames2 = new Map();
+  for (const r of regionListResults2) {
+    if (r.status !== 'fulfilled') continue;
+    const { lr } = r.value;
+    if (!authOwnerId && lr.Owner?.ID) authOwnerId = lr.Owner.ID;
+    for (const b of lr.Buckets || []) {
+      if (!seenNames2.has(b.Name)) seenNames2.set(b.Name, b);
+    }
   }
-  const { Buckets = [] } = listResp;
-  const authOwnerId = listResp.Owner?.ID || '';
+  const Buckets = Array.from(seenNames2.values());
+  const s3Primary = makeS3(s3AccessKey, s3SecretKey, S3_PRIMARY.endpoint, S3_PRIMARY.region);
 
   const settled = await Promise.allSettled(
     Buckets.map(async b => {

@@ -1691,6 +1691,11 @@
     const ownerBadge = t => t === 'user'     ? '<span style="font-size:0.75rem;color:#6ee7b7;background:rgba(110,231,183,0.1);padding:0.1rem 0.4rem;border-radius:3px;border:1px solid rgba(110,231,183,0.3)">User</span>'
                           : t === 'contract' ? '<span style="font-size:0.75rem;color:#7dd3fc;background:rgba(125,211,252,0.1);padding:0.1rem 0.4rem;border-radius:3px;border:1px solid rgba(125,211,252,0.3)">Contract</span>'
                           :                   '<span style="font-size:0.75rem;color:#64748b">—</span>';
+
+    // Always show the Load Traffic button once bucket data is available
+    const ltBtn = document.getElementById('s3-load-traffic-btn');
+    ltBtn.style.display = '';
+
     content.innerHTML = `
       <div class="table-wrapper">
         <table>
@@ -1698,7 +1703,8 @@
             <th>Bucket</th><th>Region</th><th>Type</th>
             <th style="text-align:right">Objects</th>
             <th style="text-align:right">Storage Used</th>
-            ${hasTraffic ? '<th style="text-align:right">Traffic In</th><th style="text-align:right">Traffic Out</th>' : ''}
+            <th style="text-align:right">Traffic In</th>
+            <th style="text-align:right">Traffic Out</th>
           </tr></thead>
           <tbody>${data.buckets.map(b => {
             const td = hasTraffic ? trafficData[b.name] : null;
@@ -1708,21 +1714,21 @@
               <td>${ownerBadge(b.ownerType)}</td>
               <td style="text-align:right">${b.objectCount.toLocaleString()}${b.capped ? '+' : ''}</td>
               <td style="text-align:right">${fmtBytes(b.totalBytes)}${b.capped ? '+' : ''}</td>
-              ${hasTraffic ? `<td style="text-align:right;color:#34d399">${td ? fmtBytes(td.inBytes)  : '—'}</td>
-                              <td style="text-align:right;color:#f87171">${td ? fmtBytes(td.outBytes) : '—'}</td>` : ''}
+              <td style="text-align:right;color:#34d399">${td ? fmtBytes(td.inBytes)  : '—'}</td>
+              <td style="text-align:right;color:#f87171">${td ? fmtBytes(td.outBytes) : '—'}</td>
             </tr>`;
           }).join('')}</tbody>
           <tfoot><tr style="border-top:1px solid #2d3348;font-weight:600">
             <td colspan="3">Total</td>
             <td style="text-align:right">${totalObjects.toLocaleString()}${anyBucketCapped ? '+' : ''}</td>
             <td style="text-align:right">${fmtBytes(totalBytes)}${anyBucketCapped ? '+' : ''}</td>
-            ${hasTraffic ? `<td style="text-align:right;color:#34d399">${totalIn !== null ? fmtBytes(totalIn) : '—'}</td>
-                            <td style="text-align:right;color:#f87171">${totalOut !== null ? fmtBytes(totalOut) : '—'}</td>` : ''}
+            <td style="text-align:right;color:#34d399">${totalIn !== null ? fmtBytes(totalIn) : '—'}</td>
+            <td style="text-align:right;color:#f87171">${totalOut !== null ? fmtBytes(totalOut) : '—'}</td>
           </tr></tfoot>
         </table>
       </div>
       ${anyBucketCapped ? '<p style="font-size:0.78rem;color:#64748b;margin-top:0.4rem">+ First 10,000 objects sampled per bucket — actual size may be larger.</p>' : ''}
-      ${hasTraffic ? '<p style="font-size:0.78rem;color:#64748b;margin-top:0.25rem">Traffic from access logs — inbound = PUT object sizes, outbound = GET bytes sent.</p>' : ''}
+      ${hasTraffic ? '<p style="font-size:0.78rem;color:#64748b;margin-top:0.25rem">Traffic from access logs — inbound = PUT object sizes, outbound = GET bytes sent. Only user-owned buckets with logging enabled.</p>' : ''}
     `;
   }
 
@@ -1758,7 +1764,10 @@
       <!-- Setup panel -->
       <div id="osl-setup" class="fl-panel${tab === 'osl-setup' ? ' fl-visible' : ''}">
         <div class="fl-info-box" style="margin-bottom:1rem">
-          Access logs for each user-owned bucket are written to a dedicated per-region bucket:
+          <strong style="color:#e2e8f0">Object Storage Logs capture per-bucket traffic data</strong> (GET/PUT bytes) that populates the Traffic In/Out columns in the S3 Bucket Storage card above.
+          Only <strong style="color:#6ee7b7">user-owned buckets</strong> support access logging — contract-owned buckets are managed by IONOS and cannot be configured here.
+          <br><br>
+          Access logs are written to a dedicated per-region log bucket:
           <strong style="color:#7dd3fc">${escHtml(regionLogBuckets) || 'none'}</strong>.
           These log buckets are created automatically if they don't exist. Log files are stored under prefix <code style="color:#7dd3fc">{bucket-name}/</code>.
         </div>
@@ -1817,9 +1826,9 @@
     `;
 
     // Update "Load Traffic" button on bucket card
+    // Update Load Traffic button label (visibility is controlled by renderS3Buckets)
     const ltBtn = document.getElementById('s3-load-traffic-btn');
-    ltBtn.style.display = enabledList.length ? '' : 'none';
-    ltBtn.textContent   = `\u{1F4C8} Load Traffic for ${s3CurrentPeriod} from Logs`;
+    ltBtn.textContent = `\u{1F4C8} Load Traffic for ${s3CurrentPeriod} from Logs`;
 
     // Tab switching
     content.querySelectorAll('.fl-tab').forEach(t => {
@@ -1918,9 +1927,10 @@
   // ── S3 Load Traffic button ───────────────────────────────────────────────────
 
   document.getElementById('s3-load-traffic-btn').addEventListener('click', async () => {
-    if (!s3LoggingState || !lastBucketData) return;
+    if (!lastBucketData) return;
+    if (!s3LoggingState) { alert('Logging status not loaded yet — please wait for the Object Storage Logs card to finish loading.'); return; }
     const enabledBuckets = s3LoggingState.buckets.filter(b => b.enabled && b.ownerType === 'user');
-    if (!enabledBuckets.length) { alert('No buckets have logging enabled.'); return; }
+    if (!enabledBuckets.length) { alert('No user-owned buckets have logging enabled.\nGo to the Object Storage Logs card → Setup tab and click Activate All to enable access logging first.'); return; }
 
     // Group by region — each uses its ionos-osl-{region} log bucket
     const byRegion = {};
