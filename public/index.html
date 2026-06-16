@@ -1733,8 +1733,8 @@
     card.style.display = '';
     s3LoggingState = data;
 
-    const userBuckets    = data.buckets.filter(b => b.ownerType !== 'contract');
-    const enabledList    = data.buckets.filter(b => b.enabled);
+    const userBuckets    = data.buckets.filter(b => b.ownerType === 'user');
+    const enabledList    = userBuckets.filter(b => b.enabled);
     const tab            = activeTab || 'osl-setup';
 
     // Compute standardised log bucket per region
@@ -1919,7 +1919,7 @@
 
   document.getElementById('s3-load-traffic-btn').addEventListener('click', async () => {
     if (!s3LoggingState || !lastBucketData) return;
-    const enabledBuckets = s3LoggingState.buckets.filter(b => b.enabled);
+    const enabledBuckets = s3LoggingState.buckets.filter(b => b.enabled && b.ownerType === 'user');
     if (!enabledBuckets.length) { alert('No buckets have logging enabled.'); return; }
 
     // Group by region — each uses its ionos-osl-{region} log bucket

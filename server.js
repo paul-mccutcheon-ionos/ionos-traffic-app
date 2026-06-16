@@ -7,7 +7,7 @@ const dns     = require('dns').promises;
 const zlib    = require('zlib');
 const { S3Client, CreateBucketCommand, HeadBucketCommand,
         ListBucketsCommand, ListObjectsV2Command, GetObjectCommand,
-        GetBucketAclCommand,
+        GetBucketAclCommand, GetBucketLocationCommand,
         PutBucketLifecycleConfigurationCommand,
         GetBucketLifecycleConfigurationCommand,
         GetBucketLoggingCommand,
@@ -863,41 +863,85 @@ const S3_BUCKET_REGIONS = [
   { label: 'Lenexa',    region: 'us-central-1', endpoint: 'https://s3.us-central-1.ionoscloud.com' },
 ];
 
+// Maps GetBucketLocation region codes → endpoint + label.
+// IONOS ListBuckets is global (returns all buckets from any endpoint).
+// Contract-owned DCD regions (eu-central-3/eu-central-4) share endpoints with
+// their corresponding user-owned region; we map them to the nearest accessible endpoint.
+const S3_REGION_MAP = {
+  'eu-central-1': { label: 'Frankfurt', endpoint: 'https://s3.eu-central-1.ionoscloud.com', regionCode: 'eu-central-1' },
+  'eu-central-2': { label: 'Berlin',    endpoint: 'https://s3.eu-central-2.ionoscloud.com', regionCode: 'eu-central-2' },
+  'eu-central-3': { label: 'Berlin',    endpoint: 'https://s3.eu-central-2.ionoscloud.com', regionCode: 'eu-central-2' },
+  'eu-central-4': { label: 'Frankfurt', endpoint: 'https://s3.eu-central-1.ionoscloud.com', regionCode: 'eu-central-1' },
+  'eu-south-2':   { label: 'Logroño',   endpoint: 'https://s3.eu-south-2.ionoscloud.com',   regionCode: 'eu-south-2'   },
+  'us-central-1': { label: 'Lenexa',    endpoint: 'https://s3.us-central-1.ionoscloud.com', regionCode: 'us-central-1' },
+};
+const S3_PRIMARY = S3_BUCKET_REGIONS[0]; // Frankfurt — used for the single ListBuckets call
+
 app.post('/api/s3-bucket-usage', async (req, res) => {
   const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
   const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
   if (!s3AccessKey || !s3SecretKey)
     return res.status(400).json({ error: 'S3 credentials not available.' });
 
-  const regionResults = await Promise.allSettled(
-    S3_BUCKET_REGIONS.map(async ({ label, region, endpoint }) => {
-      const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
-      const listResp = await withTimeout(s3.send(new ListBucketsCommand({})), 8000);
-      const { Buckets = [] } = listResp;
-      const authOwnerId = listResp.Owner?.ID || '';
+  // IONOS S3 ListBuckets is global — query once from the primary endpoint to
+  // avoid duplicates that arise from calling all 4 regional endpoints.
+  const s3Primary = makeS3(s3AccessKey, s3SecretKey, S3_PRIMARY.endpoint, S3_PRIMARY.region);
+  let listResp;
+  try {
+    listResp = await withTimeout(s3Primary.send(new ListBucketsCommand({})), 8000);
+  } catch (err) {
+    return res.status(502).json({ error: `S3 list failed: ${err.message}` });
+  }
+  const { Buckets = [] } = listResp;
+  const authOwnerId = listResp.Owner?.ID || '';
 
-      const buckets = await Promise.allSettled(
-        Buckets.map(async b => {
-          const [storageResult, aclResult] = await Promise.allSettled([
-            getBucketStorage(s3, b.Name),
-            withTimeout(s3.send(new GetBucketAclCommand({ Bucket: b.Name })), 5000),
-          ]);
-          const stats = storageResult.status === 'fulfilled' ? storageResult.value : { totalBytes: 0, objectCount: 0, capped: false };
-          let ownerType = 'unknown';
-          if (aclResult.status === 'fulfilled') {
-            const bucketOwnerId = aclResult.value.Owner?.ID || '';
-            ownerType = (authOwnerId && bucketOwnerId) ? (bucketOwnerId === authOwnerId ? 'user' : 'contract') : 'user';
-          }
-          return { name: b.Name, region: label, endpoint, regionCode: region, ownerType, ...stats };
-        })
-      );
-      return buckets.filter(r => r.status === 'fulfilled').map(r => r.value);
+  const settled = await Promise.allSettled(
+    Buckets.map(async b => {
+      // Determine the bucket's actual region via GetBucketLocation
+      let regionInfo = S3_REGION_MAP['eu-central-1'];
+      try {
+        const locResp = await withTimeout(s3Primary.send(new GetBucketLocationCommand({ Bucket: b.Name })), 5000);
+        const loc = locResp.LocationConstraint || 'eu-central-1';
+        regionInfo = S3_REGION_MAP[loc] || { label: loc, endpoint: S3_PRIMARY.endpoint, regionCode: loc };
+      } catch (_) {}
+
+      const s3 = makeS3(s3AccessKey, s3SecretKey, regionInfo.endpoint, regionInfo.regionCode);
+
+      const [storageResult, aclResult] = await Promise.allSettled([
+        getBucketStorage(s3, b.Name),
+        withTimeout(s3.send(new GetBucketAclCommand({ Bucket: b.Name })), 5000),
+      ]);
+
+      const stats = storageResult.status === 'fulfilled'
+        ? storageResult.value
+        : { totalBytes: 0, objectCount: 0, capped: false };
+
+      let ownerType;
+      if (aclResult.status === 'fulfilled') {
+        const bucketOwnerId = aclResult.value.Owner?.ID || '';
+        if (authOwnerId && bucketOwnerId) {
+          ownerType = bucketOwnerId === authOwnerId ? 'user' : 'contract';
+        } else {
+          ownerType = 'user'; // ACL readable but IDs unavailable — assume user-owned
+        }
+      } else {
+        ownerType = 'contract'; // ACL access denied → not owned by this user
+      }
+
+      return {
+        name: b.Name,
+        region: regionInfo.label,
+        endpoint: regionInfo.endpoint,
+        regionCode: regionInfo.regionCode,
+        ownerType,
+        ...stats,
+      };
     })
   );
 
-  const buckets = regionResults
+  const buckets = settled
     .filter(r => r.status === 'fulfilled')
-    .flatMap(r => r.value)
+    .map(r => r.value)
     .sort((a, b) => b.totalBytes - a.totalBytes);
 
   res.json({ buckets });
@@ -937,32 +981,64 @@ app.post('/api/s3-logging-status', async (req, res) => {
   if (!s3AccessKey || !s3SecretKey)
     return res.status(400).json({ error: 'S3 credentials not available.' });
 
-  const regionResults = await Promise.allSettled(
-    S3_BUCKET_REGIONS.map(async ({ label, region, endpoint }) => {
-      const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
-      const listResp = await withTimeout(s3.send(new ListBucketsCommand({})), 8000);
-      const { Buckets = [] } = listResp;
-      const authOwnerId = listResp.Owner?.ID || '';
-      const results = await Promise.allSettled(
-        Buckets.map(async b => {
-          const [logResult, aclResult] = await Promise.allSettled([
-            withTimeout(s3.send(new GetBucketLoggingCommand({ Bucket: b.Name })), 5000),
-            withTimeout(s3.send(new GetBucketAclCommand({ Bucket: b.Name })), 5000),
-          ]);
-          const enabled = logResult.status === 'fulfilled' ? !!(logResult.value.LoggingEnabled?.TargetBucket) : false;
-          const bucketOwnerId = aclResult.status === 'fulfilled' ? (aclResult.value.Owner?.ID || '') : '';
-          const ownerType = (authOwnerId && bucketOwnerId) ? (bucketOwnerId === authOwnerId ? 'user' : 'contract') : 'user';
-          return { name: b.Name, region: label, endpoint, regionCode: region, ownerType,
-            enabled, targetBucket: logResult.value?.LoggingEnabled?.TargetBucket || '', targetPrefix: logResult.value?.LoggingEnabled?.TargetPrefix || '' };
-        })
-      );
-      return results.filter(r => r.status === 'fulfilled').map(r => r.value);
+  const s3Primary = makeS3(s3AccessKey, s3SecretKey, S3_PRIMARY.endpoint, S3_PRIMARY.region);
+  let listResp;
+  try {
+    listResp = await withTimeout(s3Primary.send(new ListBucketsCommand({})), 8000);
+  } catch (err) {
+    return res.status(502).json({ error: `S3 list failed: ${err.message}` });
+  }
+  const { Buckets = [] } = listResp;
+  const authOwnerId = listResp.Owner?.ID || '';
+
+  const settled = await Promise.allSettled(
+    Buckets.map(async b => {
+      let regionInfo = S3_REGION_MAP['eu-central-1'];
+      try {
+        const locResp = await withTimeout(s3Primary.send(new GetBucketLocationCommand({ Bucket: b.Name })), 5000);
+        const loc = locResp.LocationConstraint || 'eu-central-1';
+        regionInfo = S3_REGION_MAP[loc] || { label: loc, endpoint: S3_PRIMARY.endpoint, regionCode: loc };
+      } catch (_) {}
+
+      const s3 = makeS3(s3AccessKey, s3SecretKey, regionInfo.endpoint, regionInfo.regionCode);
+
+      const [logResult, aclResult] = await Promise.allSettled([
+        withTimeout(s3.send(new GetBucketLoggingCommand({ Bucket: b.Name })), 5000),
+        withTimeout(s3.send(new GetBucketAclCommand({ Bucket: b.Name })), 5000),
+      ]);
+
+      const enabled = logResult.status === 'fulfilled'
+        ? !!(logResult.value?.LoggingEnabled?.TargetBucket)
+        : false;
+
+      let ownerType;
+      if (aclResult.status === 'fulfilled') {
+        const bucketOwnerId = aclResult.value.Owner?.ID || '';
+        if (authOwnerId && bucketOwnerId) {
+          ownerType = bucketOwnerId === authOwnerId ? 'user' : 'contract';
+        } else {
+          ownerType = 'user';
+        }
+      } else {
+        ownerType = 'contract';
+      }
+
+      return {
+        name: b.Name,
+        region: regionInfo.label,
+        endpoint: regionInfo.endpoint,
+        regionCode: regionInfo.regionCode,
+        ownerType,
+        enabled,
+        targetBucket: logResult.value?.LoggingEnabled?.TargetBucket || '',
+        targetPrefix:  logResult.value?.LoggingEnabled?.TargetPrefix  || '',
+      };
     })
   );
 
-  const buckets = regionResults
+  const buckets = settled
     .filter(r => r.status === 'fulfilled')
-    .flatMap(r => r.value)
+    .map(r => r.value)
     .sort((a, b) => a.name.localeCompare(b.name));
 
   res.json({ buckets });
