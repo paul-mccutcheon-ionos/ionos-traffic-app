@@ -790,6 +790,11 @@
       <h2>&#129524; S3 Object Storage Traffic Summary</h2>
       <div class="s3-summary" id="s3-summary-grid"></div>
     </div>
+    <!-- S3 Monthly Chart -->
+    <div class="card" id="s3-chart-card" style="display:none">
+      <h2>&#128200; S3 Monthly Traffic</h2>
+      <div class="chart-container"><canvas id="s3-chart"></canvas></div>
+    </div>
     <!-- S3 Projection -->
     <div class="card proj-card" id="s3-proj-card">
       <h2>📈 Next Month S3 Traffic Projection</h2>
@@ -1216,6 +1221,7 @@
   let ipChart    = null;
   let vdcChart   = null;
   let rangeChart = null;
+  let s3Chart    = null;
 
   function buildChart(canvasId, chartRef, dates) {
     const ctx = document.getElementById(canvasId).getContext('2d');
@@ -1738,11 +1744,20 @@
         lastQueryParams = { token, contractId, currentPeriod: period, targetIp: '', vdcQuery: '' };
         document.getElementById('s3-proj-result').innerHTML = '';
 
-        // Live billing meters (rolling MTD from /usage)
+        // Monthly trend chart
+        const chartCard = document.getElementById('s3-chart-card');
+        if (d.history && d.history.length) {
+          chartCard.style.display = '';
+          s3Chart = buildChart('s3-chart', s3Chart, d.history);
+        } else {
+          chartCard.style.display = 'none';
+        }
+
+        // Live billing meters
         renderLiveUsage('s3-live-usage-section', 's3-live-usage-card', d.usage);
 
         document.getElementById('s3-results').style.display = '';
-        document.getElementById('s3-live-usage-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById('s3-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     } catch (err) {
       showError('Network error: ' + err.message);

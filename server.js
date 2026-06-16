@@ -486,6 +486,27 @@ app.post('/api/query-s3', async (req, res) => {
   const s3OutGB = ['S3TO2100', 'S3TO2200', 'S3TO2300']
     .reduce((s, id) => s + (s3Meters[id]?.totalGB || 0), 0);
 
+  // Fetch the 3 months before the queried period for the trend chart.
+  const historyPeriods = getPreviousPeriods(period, 3);
+  const historySettled = await Promise.allSettled(
+    historyPeriods.map(p => fetchContractUsage(contractId, token, p))
+  );
+  const s3TotalsFromUsage = u => {
+    if (!u) return { inGB: 0, outGB: 0 };
+    const m = u.meters;
+    return {
+      inGB:  Math.round(((m.S3TI1000?.quantity || 0) + (m.S3TI2100?.quantity || 0) + (m.S3TI2200?.quantity || 0)) * 10000) / 10000,
+      outGB: Math.round(((m.S3TO1000?.quantity || 0) + (m.S3TO2100?.quantity || 0) + (m.S3TO2200?.quantity || 0) + (m.S3TO2300?.quantity || 0)) * 10000) / 10000,
+    };
+  };
+  const history = [
+    ...historyPeriods.map((p, i) => ({
+      date: p,
+      ...s3TotalsFromUsage(historySettled[i].status === 'fulfilled' ? historySettled[i].value : null),
+    })),
+    { date: period, ...s3TotalsFromUsage(usage) },
+  ];
+
   res.json({
     s3Meters, trafficMeters,
     totals: {
@@ -493,7 +514,8 @@ app.post('/api/query-s3', async (req, res) => {
       outGB: Math.floor(s3OutGB * 10000) / 10000
     },
     allMeterIds: Array.from(apiMeters.keys()),
-    usage   // { startDate, endDate, meters: { meterId: {quantity, unit, desc} } } or null
+    usage,  // { startDate, endDate, meters: { meterId: {quantity, unit, desc} } } or null
+    history // [{ date: 'YYYY-MM', inGB, outGB }, ...] — last 3 months + queried month
   });
 });
 
