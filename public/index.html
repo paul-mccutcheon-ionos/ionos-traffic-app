@@ -1807,25 +1807,31 @@
       <div id="osl-status" class="fl-panel${tab === 'osl-status' ? ' fl-visible' : ''}">
         <table class="fl-status-tbl">
           <thead><tr>
-            <th>Bucket</th><th>Region</th><th>Type</th><th>Logging</th><th>Log Bucket</th><th>Prefix</th>
+            <th>Bucket</th><th>Region</th><th>Type</th><th>Logging</th><th>Log Data</th><th>Log Bucket</th><th>Prefix</th>
           </tr></thead>
           <tbody>
-            ${data.buckets.map(b => `<tr>
+            ${data.buckets.map(b => {
+              const logDataCell = b.hasLogData === true
+                ? '<span class="fl-dot-on"></span><span style="color:#4ade80;font-size:0.82rem">Available</span>'
+                : b.hasLogData === false
+                  ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:4px;vertical-align:middle"></span><span style="color:#f59e0b;font-size:0.82rem">Pending</span>'
+                  : '<span style="color:#475569;font-size:0.82rem">—</span>';
+              return `<tr>
               <td style="font-family:monospace;font-size:0.82rem">${escHtml(b.name)}</td>
               <td>${escHtml(b.region)}</td>
               <td>${typeBadge(b.ownerType)}</td>
               <td>${b.enabled
                 ? '<span class="fl-dot-on"></span><span style="color:#4ade80;font-size:0.82rem">Enabled</span>'
                 : '<span class="fl-dot-off"></span><span style="color:#475569;font-size:0.82rem">Disabled</span>'}</td>
+              <td>${logDataCell}</td>
               <td style="font-family:monospace;font-size:0.78rem;color:#7dd3fc">${escHtml(b.targetBucket || '—')}</td>
               <td style="font-family:monospace;font-size:0.78rem;color:#64748b">${escHtml(b.targetPrefix || '—')}</td>
-            </tr>`).join('')}
+            </tr>`;}).join('')}
           </tbody>
         </table>
       </div>
     `;
 
-    // Update "Load Traffic" button on bucket card
     // Update Load Traffic button label (visibility is controlled by renderS3Buckets)
     const ltBtn = document.getElementById('s3-load-traffic-btn');
     ltBtn.textContent = `\u{1F4C8} Load Traffic for ${s3CurrentPeriod} from Logs`;

@@ -1036,9 +1036,9 @@ app.post('/api/s3-logging-status', async (req, res) => {
         withTimeout(s3.send(new GetBucketAclCommand({ Bucket: b.Name })), 5000),
       ]);
 
-      const enabled = logResult.status === 'fulfilled'
-        ? !!(logResult.value?.LoggingEnabled?.TargetBucket)
-        : false;
+      const enabled      = logResult.status === 'fulfilled' ? !!(logResult.value?.LoggingEnabled?.TargetBucket) : false;
+      const targetBucket = logResult.value?.LoggingEnabled?.TargetBucket || '';
+      const targetPrefix = logResult.value?.LoggingEnabled?.TargetPrefix  || '';
 
       let ownerType;
       if (aclResult.status === 'fulfilled') {
@@ -1052,6 +1052,21 @@ app.post('/api/s3-logging-status', async (req, res) => {
         ownerType = 'contract';
       }
 
+      // Check whether any log files have actually been written for this bucket.
+      // A quick ListObjectsV2 with MaxKeys:1 on the log prefix is enough.
+      let hasLogData = null; // null = logging disabled / N/A
+      if (enabled && targetBucket) {
+        try {
+          const checkResp = await withTimeout(
+            s3.send(new ListObjectsV2Command({ Bucket: targetBucket, Prefix: targetPrefix || `${b.Name}/`, MaxKeys: 1 })),
+            5000
+          );
+          hasLogData = (checkResp.Contents || []).length > 0;
+        } catch (_) {
+          hasLogData = false;
+        }
+      }
+
       return {
         name: b.Name,
         region: regionInfo.label,
@@ -1059,8 +1074,9 @@ app.post('/api/s3-logging-status', async (req, res) => {
         regionCode: regionInfo.regionCode,
         ownerType,
         enabled,
-        targetBucket: logResult.value?.LoggingEnabled?.TargetBucket || '',
-        targetPrefix:  logResult.value?.LoggingEnabled?.TargetPrefix  || '',
+        targetBucket,
+        targetPrefix,
+        hasLogData,
       };
     })
   );
