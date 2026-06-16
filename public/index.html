@@ -1659,18 +1659,17 @@
       </div>`;
   }
 
-  function fmtBytes(b) {
-    if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB';
-    if (b >= 1048576)    return (b / 1048576).toFixed(1) + ' MB';
-    if (b >= 1024)       return (b / 1024).toFixed(1) + ' KB';
-    return b + ' B';
-  }
+  const fmtBytes = b => b >= 1073741824 ? (b / 1073741824).toFixed(2) + ' GB'
+                      : b >= 1048576    ? (b / 1048576).toFixed(1)  + ' MB'
+                      : b >= 1024       ? (b / 1024).toFixed(1)     + ' KB'
+                      : b + ' B';
 
   function renderS3Buckets(data) {
     const card    = document.getElementById('s3-buckets-card');
     const content = document.getElementById('s3-buckets-content');
     if (!data || !data.buckets || !data.buckets.length) { card.style.display = 'none'; return; }
     card.style.display = '';
+    const anyBucketCapped = data.buckets.some(b => b.capped);
     const totalBytes   = data.buckets.reduce((s, b) => s + b.totalBytes,   0);
     const totalObjects = data.buckets.reduce((s, b) => s + b.objectCount,  0);
     content.innerHTML = `
@@ -1685,15 +1684,17 @@
             <td style="font-family:monospace;font-size:0.85rem">${escHtml(b.name)}</td>
             <td>${escHtml(b.region)}</td>
             <td style="text-align:right">${b.objectCount.toLocaleString()}${b.capped ? '+' : ''}</td>
-            <td style="text-align:right">${fmtBytes(b.totalBytes)}</td>
+            <td style="text-align:right">${fmtBytes(b.totalBytes)}${b.capped ? '+' : ''}</td>
           </tr>`).join('')}</tbody>
           <tfoot><tr style="border-top:1px solid #2d3348;font-weight:600">
             <td colspan="2">Total</td>
-            <td style="text-align:right">${totalObjects.toLocaleString()}</td>
-            <td style="text-align:right">${fmtBytes(totalBytes)}</td>
+            <td style="text-align:right">${totalObjects.toLocaleString()}${anyBucketCapped ? '+' : ''}</td>
+            <td style="text-align:right">${fmtBytes(totalBytes)}${anyBucketCapped ? '+' : ''}</td>
           </tr></tfoot>
         </table>
-      </div>`;
+      </div>
+      ${anyBucketCapped ? '<p style="font-size:0.78rem;color:#64748b;margin-top:0.4rem">+ First 10,000 objects sampled per bucket — actual size may be larger.</p>' : ''}
+    `;
   }
 
   // ── Form submit ─────────────────────────────────────────────────────────────
@@ -1776,19 +1777,22 @@
         showFlowLogsCard(vdcQuery, token, document.getElementById('vdcQuery').value.trim());
 
       } else if (mode === 's3') {
-        // Fire main query and bucket storage lookup in parallel
-        const [mainResp, bucketData] = await Promise.all([
-          fetch('/api/query-s3', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token, contractId, period })
-          }),
-          (flS3Creds.s3AccessKey && flS3Creds.s3SecretKey)
-            ? fetch('/api/s3-bucket-usage', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ s3AccessKey: flS3Creds.s3AccessKey, s3SecretKey: flS3Creds.s3SecretKey })
-              }).then(r => r.ok ? r.json() : null).catch(() => null)
-            : Promise.resolve(null)
-        ]);
+        // Start bucket fetch in background immediately — don't await it here
+        const bucketFetch = fetch('/api/s3-bucket-usage', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ s3AccessKey: flS3Creds.s3AccessKey || '', s3SecretKey: flS3Creds.s3SecretKey || '' })
+        }).then(r => r.ok ? r.json() : null).catch(() => null);
+
+        // Show bucket card with loading state right away
+        document.getElementById('s3-buckets-card').style.display = '';
+        document.getElementById('s3-buckets-content').innerHTML =
+          '<p style="color:#64748b;font-size:0.88rem;padding:0.5rem 0">&#9203; Loading bucket data&hellip;</p>';
+
+        // Await main billing query
+        const mainResp = await fetch('/api/query-s3', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, contractId, period })
+        });
         const d = await mainResp.json();
         if (!mainResp.ok) { showError(d.error || `Error ${mainResp.status}`); return; }
 
@@ -1808,14 +1812,21 @@
           chartCard.style.display = 'none';
         }
 
-        // Per-bucket storage breakdown
-        renderS3Buckets(bucketData);
-
         // Live billing meters
         renderLiveUsage('s3-live-usage-section', 's3-live-usage-card', d.usage);
 
         document.getElementById('s3-results').style.display = '';
         document.getElementById('s3-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        // Update bucket card when background fetch completes (non-blocking)
+        bucketFetch.then(bucketData => {
+          if (!bucketData) {
+            document.getElementById('s3-buckets-content').innerHTML =
+              '<p style="color:#f87171;font-size:0.88rem;padding:0.5rem 0">&#9888; Could not load bucket data.</p>';
+          } else {
+            renderS3Buckets(bucketData);
+          }
+        });
       }
     } catch (err) {
       showError('Network error: ' + err.message);
@@ -2149,10 +2160,6 @@
     }
   });
 
-  const fmtBytes = b => b > 1073741824 ? (b/1073741824).toFixed(2)+' GB'
-                      : b > 1048576    ? (b/1048576).toFixed(2)+' MB'
-                      : b > 1024       ? (b/1024).toFixed(1)+' KB'
-                      : b+' B';
   const fmtTime = ts => {
     if (!ts) return '—';
     const dt = new Date(ts * 1000);

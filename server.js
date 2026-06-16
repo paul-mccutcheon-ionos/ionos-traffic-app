@@ -834,14 +834,18 @@ app.post('/api/query-range', async (req, res) => {
 
 // ── S3 Bucket Storage ────────────────────────────────────────────────────────
 
+const withTimeout = (promise, ms) =>
+  Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
 async function getBucketStorage(s3, bucketName) {
   let totalBytes = 0, objectCount = 0, capped = false;
   let continuationToken;
-  const CAP = 100000;
+  const CAP = 10000;
   do {
-    const resp = await s3.send(new ListObjectsV2Command({
-      Bucket: bucketName, MaxKeys: 1000, ContinuationToken: continuationToken,
-    }));
+    const resp = await withTimeout(
+      s3.send(new ListObjectsV2Command({ Bucket: bucketName, MaxKeys: 1000, ContinuationToken: continuationToken })),
+      8000
+    );
     for (const obj of resp.Contents || []) { totalBytes += obj.Size || 0; objectCount++; }
     if (objectCount >= CAP) { capped = true; break; }
     continuationToken = resp.NextContinuationToken;
@@ -857,14 +861,15 @@ const S3_BUCKET_REGIONS = [
 ];
 
 app.post('/api/s3-bucket-usage', async (req, res) => {
-  const { s3AccessKey, s3SecretKey } = req.body;
+  const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
+  const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
   if (!s3AccessKey || !s3SecretKey)
-    return res.status(400).json({ error: 's3AccessKey and s3SecretKey are required.' });
+    return res.status(400).json({ error: 'S3 credentials not available.' });
 
   const regionResults = await Promise.allSettled(
     S3_BUCKET_REGIONS.map(async ({ label, region, endpoint }) => {
       const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
-      const { Buckets = [] } = await s3.send(new ListBucketsCommand({}));
+      const { Buckets = [] } = await withTimeout(s3.send(new ListBucketsCommand({})), 8000);
       const buckets = await Promise.allSettled(
         Buckets.map(b => getBucketStorage(s3, b.Name).then(stats => ({ name: b.Name, region: label, ...stats })))
       );
