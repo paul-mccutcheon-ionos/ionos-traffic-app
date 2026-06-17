@@ -1790,7 +1790,7 @@
         <div class="table-wrapper">
           <table>
             <thead><tr>
-              <th>Bucket</th><th>Region</th><th>Log Bucket</th><th>Status</th>
+              <th>Bucket</th><th>Region</th><th>Log Bucket</th><th>Status</th><th>Action</th>
             </tr></thead>
             <tbody>
               ${userBuckets.map(b => `<tr>
@@ -1800,6 +1800,18 @@
                 <td>${b.enabled
                   ? '<span style="color:#4ade80;font-size:0.85rem">&#10004; Logging on</span>'
                   : '<span style="color:#475569;font-size:0.85rem">&#9679; Off</span>'}</td>
+                <td>${b.enabled
+                  ? `<button type="button" class="osl-toggle-btn"
+                       data-name="${escHtml(b.name)}" data-endpoint="${escHtml(b.endpoint)}"
+                       data-region="${escHtml(b.regionCode)}" data-enable="false"
+                       style="padding:0.25rem 0.7rem;border-radius:4px;border:1px solid #475569;background:transparent;color:#94a3b8;font-size:0.78rem;cursor:pointer">
+                       Disable</button>`
+                  : `<button type="button" class="osl-toggle-btn"
+                       data-name="${escHtml(b.name)}" data-endpoint="${escHtml(b.endpoint)}"
+                       data-region="${escHtml(b.regionCode)}" data-enable="true"
+                       style="padding:0.25rem 0.7rem;border-radius:4px;border:1px solid #22c55e;background:#14532d;color:#4ade80;font-size:0.78rem;cursor:pointer">
+                       Enable</button>`
+                }</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -1855,6 +1867,40 @@
     // Tab switching
     content.querySelectorAll('.fl-tab').forEach(t => {
       t.addEventListener('click', () => renderS3Logging(s3LoggingState, t.dataset.tab));
+    });
+
+    // ── Per-bucket Enable / Disable ─────────────────────────────────────────────
+    content.querySelectorAll('.osl-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const { name, endpoint, region: regionCode } = btn.dataset;
+        const enable = btn.dataset.enable === 'true';
+        const origText = btn.textContent.trim();
+        btn.disabled = true;
+        btn.textContent = enable ? 'Enabling…' : 'Disabling…';
+        try {
+          const r = await fetch('/api/s3-osl-setup', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              s3AccessKey: flS3Creds.s3AccessKey || '', s3SecretKey: flS3Creds.s3SecretKey || '',
+              buckets: [{ name, endpoint, regionCode }],
+              enable,
+            })
+          });
+          const d = await r.json();
+          if (r.ok) {
+            const res = d.results?.[0];
+            const bkt = s3LoggingState.buckets.find(b => b.name === name);
+            if (bkt && res) {
+              if (enable && res.status === 'activated') { bkt.enabled = true; bkt.targetBucket = `ionos-osl-${regionCode}`; bkt.targetPrefix = `${name}/`; }
+              if (!enable && res.status === 'deactivated') { bkt.enabled = false; bkt.targetBucket = ''; bkt.targetPrefix = ''; }
+            }
+          }
+          renderS3Logging(s3LoggingState, 'osl-setup');
+        } catch (_) {
+          btn.disabled = false;
+          btn.textContent = origText;
+        }
+      });
     });
 
     // ── Activate All ────────────────────────────────────────────────────────────
