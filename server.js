@@ -892,7 +892,7 @@ app.post('/api/s3-bucket-usage', async (req, res) => {
     S3_BUCKET_REGIONS.map(async ({ endpoint, region }) => {
       const s3r = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
       const lr = await withTimeout(s3r.send(new ListBucketsCommand({})), 8000);
-      return { lr };
+      return { lr, region };
     })
   );
   if (regionListResults.every(r => r.status === 'rejected'))
@@ -902,10 +902,10 @@ app.post('/api/s3-bucket-usage', async (req, res) => {
   const seenNames = new Map();
   for (const r of regionListResults) {
     if (r.status !== 'fulfilled') continue;
-    const { lr } = r.value;
+    const { lr, region } = r.value;
     if (!authOwnerId && lr.Owner?.ID) authOwnerId = lr.Owner.ID;
     for (const b of lr.Buckets || []) {
-      if (!seenNames.has(b.Name)) seenNames.set(b.Name, b);
+      if (!seenNames.has(b.Name)) seenNames.set(b.Name, { ...b, sourceRegion: region });
     }
   }
   const Buckets = Array.from(seenNames.values());
@@ -913,8 +913,10 @@ app.post('/api/s3-bucket-usage', async (req, res) => {
 
   const settled = await Promise.allSettled(
     Buckets.map(async b => {
-      // Determine the bucket's actual region via GetBucketLocation
-      let regionInfo = S3_REGION_MAP['eu-central-1'];
+      // Determine the bucket's actual region via GetBucketLocation.
+      // Fall back to the region that first returned this bucket in ListBuckets —
+      // contract-owned buckets may deny GetBucketLocation but appear only on their home endpoint.
+      let regionInfo = S3_REGION_MAP[b.sourceRegion] || S3_REGION_MAP['eu-central-1'];
       try {
         const locResp = await withTimeout(s3Primary.send(new GetBucketLocationCommand({ Bucket: b.Name })), 5000);
         const loc = locResp.LocationConstraint || 'eu-central-1';
@@ -1001,7 +1003,7 @@ app.post('/api/s3-logging-status', async (req, res) => {
     S3_BUCKET_REGIONS.map(async ({ endpoint, region }) => {
       const s3r = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
       const lr = await withTimeout(s3r.send(new ListBucketsCommand({})), 8000);
-      return { lr };
+      return { lr, region };
     })
   );
   if (regionListResults2.every(r => r.status === 'rejected'))
@@ -1011,10 +1013,10 @@ app.post('/api/s3-logging-status', async (req, res) => {
   const seenNames2 = new Map();
   for (const r of regionListResults2) {
     if (r.status !== 'fulfilled') continue;
-    const { lr } = r.value;
+    const { lr, region } = r.value;
     if (!authOwnerId && lr.Owner?.ID) authOwnerId = lr.Owner.ID;
     for (const b of lr.Buckets || []) {
-      if (!seenNames2.has(b.Name)) seenNames2.set(b.Name, b);
+      if (!seenNames2.has(b.Name)) seenNames2.set(b.Name, { ...b, sourceRegion: region });
     }
   }
   const Buckets = Array.from(seenNames2.values());
@@ -1022,7 +1024,7 @@ app.post('/api/s3-logging-status', async (req, res) => {
 
   const settled = await Promise.allSettled(
     Buckets.map(async b => {
-      let regionInfo = S3_REGION_MAP['eu-central-1'];
+      let regionInfo = S3_REGION_MAP[b.sourceRegion] || S3_REGION_MAP['eu-central-1'];
       try {
         const locResp = await withTimeout(s3Primary.send(new GetBucketLocationCommand({ Bucket: b.Name })), 5000);
         const loc = locResp.LocationConstraint || 'eu-central-1';
