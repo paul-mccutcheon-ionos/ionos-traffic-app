@@ -878,6 +878,37 @@ const S3_REGION_MAP = {
 };
 const S3_PRIMARY = S3_BUCKET_REGIONS[0]; // Frankfurt — used for the single ListBuckets call
 
+// Resolve the S3_REGION_MAP entry for a bucket.
+// 1. Try GetBucketLocation from the primary endpoint (works for user-owned buckets).
+// 2. On failure, probe each regional endpoint with HeadBucket — the one that returns
+//    200 or 403 (bucket exists but access denied) owns the bucket.
+// 3. Final fallback: sourceRegion recorded during ListBuckets dedup.
+async function resolveBucketRegion(s3AccessKey, s3SecretKey, bucketName, sourceRegion) {
+  try {
+    const s3p = makeS3(s3AccessKey, s3SecretKey, S3_PRIMARY.endpoint, S3_PRIMARY.region);
+    const locResp = await withTimeout(s3p.send(new GetBucketLocationCommand({ Bucket: bucketName })), 5000);
+    const loc = locResp.LocationConstraint || 'eu-central-1';
+    return S3_REGION_MAP[loc] || S3_REGION_MAP['eu-central-1'];
+  } catch (_) {}
+
+  const headResults = await Promise.allSettled(
+    S3_BUCKET_REGIONS.map(async ({ endpoint, region }) => {
+      const s3r = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
+      try {
+        await withTimeout(s3r.send(new HeadBucketCommand({ Bucket: bucketName })), 5000);
+        return region;
+      } catch (e) {
+        if (e.$metadata?.httpStatusCode === 403) return region;
+        throw e;
+      }
+    })
+  );
+  const found = headResults.find(r => r.status === 'fulfilled');
+  if (found) return S3_REGION_MAP[found.value] || S3_REGION_MAP['eu-central-1'];
+
+  return S3_REGION_MAP[sourceRegion] || S3_REGION_MAP['eu-central-1'];
+}
+
 app.post('/api/s3-bucket-usage', async (req, res) => {
   const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
   const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
@@ -913,15 +944,7 @@ app.post('/api/s3-bucket-usage', async (req, res) => {
 
   const settled = await Promise.allSettled(
     Buckets.map(async b => {
-      // Determine the bucket's actual region via GetBucketLocation.
-      // Fall back to the region that first returned this bucket in ListBuckets —
-      // contract-owned buckets may deny GetBucketLocation but appear only on their home endpoint.
-      let regionInfo = S3_REGION_MAP[b.sourceRegion] || S3_REGION_MAP['eu-central-1'];
-      try {
-        const locResp = await withTimeout(s3Primary.send(new GetBucketLocationCommand({ Bucket: b.Name })), 5000);
-        const loc = locResp.LocationConstraint || 'eu-central-1';
-        regionInfo = S3_REGION_MAP[loc] || { label: loc, endpoint: S3_PRIMARY.endpoint, regionCode: loc };
-      } catch (_) {}
+      const regionInfo = await resolveBucketRegion(s3AccessKey, s3SecretKey, b.Name, b.sourceRegion);
 
       const s3 = makeS3(s3AccessKey, s3SecretKey, regionInfo.endpoint, regionInfo.regionCode);
 
@@ -1024,12 +1047,7 @@ app.post('/api/s3-logging-status', async (req, res) => {
 
   const settled = await Promise.allSettled(
     Buckets.map(async b => {
-      let regionInfo = S3_REGION_MAP[b.sourceRegion] || S3_REGION_MAP['eu-central-1'];
-      try {
-        const locResp = await withTimeout(s3Primary.send(new GetBucketLocationCommand({ Bucket: b.Name })), 5000);
-        const loc = locResp.LocationConstraint || 'eu-central-1';
-        regionInfo = S3_REGION_MAP[loc] || { label: loc, endpoint: S3_PRIMARY.endpoint, regionCode: loc };
-      } catch (_) {}
+      const regionInfo = await resolveBucketRegion(s3AccessKey, s3SecretKey, b.Name, b.sourceRegion);
 
       const s3 = makeS3(s3AccessKey, s3SecretKey, regionInfo.endpoint, regionInfo.regionCode);
 
