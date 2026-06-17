@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IONOS Traffic Billing Tool</title>
+  <title>IONOS Cloud Traffic Billing Tool</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@500;600&display=swap" rel="stylesheet" />
   <script src="/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -24,7 +27,7 @@
     }
     .header-logo img { display: block; height: 48px; width: auto; }
     .header-title { text-align: center; flex: 1; }
-    .header-title h1 { font-size: 1.75rem; font-weight: 700; color: #38bdf8; letter-spacing: 0.03em; }
+    .header-title h1 { font-family: 'Open Sans', 'Segoe UI', system-ui, sans-serif; font-size: 1.75rem; font-weight: 600; color: #ffffff; letter-spacing: 0.01em; }
     .header-title h1 .version-badge {
       display: inline-block; vertical-align: middle;
       margin-left: 0.6rem; padding: 0.15rem 0.55rem;
@@ -386,7 +389,7 @@
       <img src="/ionos-logo.svg" alt="IONOS" />
     </div>
     <div class="header-title">
-      <h1>IONOS Traffic Billing Tool<span id="app-version" class="version-badge"></span></h1>
+      <h1>IONOS Cloud Traffic Billing Tool<span id="app-version" class="version-badge"></span></h1>
       <p>Query IP traffic, VDC aggregate traffic, and S3 Object Storage billing</p>
     </div>
     <div class="header-spacer"></div>
