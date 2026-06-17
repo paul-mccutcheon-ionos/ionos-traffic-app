@@ -1225,9 +1225,10 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
             if (!p) continue;
             const bkt = p.bucket;
             if (!traffic[bkt]) traffic[bkt] = { inBytes: 0, outBytes: 0 };
-            if (p.operation === 'REST.GET.OBJECT') {
+            if (p.bytesSent > 0) {
               traffic[bkt].outBytes += p.bytesSent;
-            } else if (p.operation === 'REST.PUT.OBJECT' || p.operation === 'REST.COPY.OBJECT') {
+            }
+            if ((p.operation === 'REST.PUT.OBJECT' || p.operation === 'REST.COPY.OBJECT' || p.operation === 'REST.UPLOAD.PART') && p.objectSize > 0) {
               traffic[bkt].inBytes += p.objectSize;
             }
           }
