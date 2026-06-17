@@ -792,13 +792,13 @@
     </div>
     <!-- S3 Monthly Chart -->
     <div class="card" id="s3-chart-card" style="display:none">
-      <h2>&#128200; S3 Traffic — <span id="s3-chart-period"></span></h2>
+      <h2>&#128200; Object Storage Traffic — <span id="s3-chart-period"></span></h2>
       <div class="chart-container"><canvas id="s3-chart"></canvas></div>
     </div>
     <!-- S3 Bucket Storage -->
     <div class="card" id="s3-buckets-card" style="display:none">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:0.75rem">
-        <h2 style="margin:0">&#129524; S3 Bucket Storage</h2>
+        <h2 style="margin:0">&#129524; Object Storage Buckets</h2>
         <button type="button" id="s3-load-traffic-btn" style="display:none;font-size:0.78rem;padding:0.25rem 0.7rem;background:transparent;border:1px solid #334155;color:#94a3b8;border-radius:4px;cursor:pointer">&#128200; Load Traffic from Logs</button>
       </div>
       <div id="s3-buckets-content"></div>
@@ -810,7 +810,7 @@
     </div>
     <!-- S3 Projection -->
     <div class="card proj-card" id="s3-proj-card">
-      <h2>📈 Next Month S3 Traffic Projection</h2>
+      <h2>📈 Next Month Object Storage Traffic Projection</h2>
       <div class="proj-controls">
         <label style="font-size:0.85rem;color:#94a3b8;font-weight:500">Base projection on</label>
         <select id="s3-proj-months" class="proj-months-sel">
@@ -1764,7 +1764,7 @@
       <!-- Setup panel -->
       <div id="osl-setup" class="fl-panel${tab === 'osl-setup' ? ' fl-visible' : ''}">
         <div class="fl-info-box" style="margin-bottom:1rem">
-          <strong style="color:#e2e8f0">Object Storage Logs capture per-bucket traffic data</strong> (GET/PUT bytes) that populates the Traffic In/Out columns in the S3 Bucket Storage card above.
+          <strong style="color:#e2e8f0">Object Storage Logs capture per-bucket traffic data</strong> (GET/PUT bytes) that populates the Traffic In/Out columns in the Object Storage Buckets card above.
           Only <strong style="color:#6ee7b7">user-owned buckets</strong> support access logging — contract-owned buckets are managed by IONOS and cannot be configured here.
           <br><br>
           Access logs are written to a dedicated per-region log bucket:
