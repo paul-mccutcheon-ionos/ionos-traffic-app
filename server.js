@@ -1236,24 +1236,30 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
 
       if (!keys.length) return;
 
-      await Promise.allSettled(
-        keys.slice(0, 500).map(async key => {
-          const obj = await withTimeout(s3.send(new GetObjectCommand({ Bucket: logBucket, Key: key })), 10000);
-          const buf = await streamToBuffer(obj.Body);
-          for (const rawLine of buf.toString('utf8').split('\n')) {
-            const p = parseS3LogLine(rawLine.trim());
-            if (!p) continue;
-            const bkt = p.bucket;
-            if (!traffic[bkt]) traffic[bkt] = { inBytes: 0, outBytes: 0 };
-            if (p.bytesSent > 0) {
-              traffic[bkt].outBytes += p.bytesSent;
+      // Process in batches of 50 concurrent reads. Firing all keys simultaneously
+      // (previously up to 500 at once) causes inconsistent timeouts under load,
+      // making successive runs return different totals.
+      const BATCH = 50;
+      for (let i = 0; i < keys.length; i += BATCH) {
+        await Promise.allSettled(
+          keys.slice(i, i + BATCH).map(async key => {
+            const obj = await withTimeout(s3.send(new GetObjectCommand({ Bucket: logBucket, Key: key })), 15000);
+            const buf = await streamToBuffer(obj.Body);
+            for (const rawLine of buf.toString('utf8').split('\n')) {
+              const p = parseS3LogLine(rawLine.trim());
+              if (!p) continue;
+              const bkt = p.bucket;
+              if (!traffic[bkt]) traffic[bkt] = { inBytes: 0, outBytes: 0 };
+              if (p.bytesSent > 0) {
+                traffic[bkt].outBytes += p.bytesSent;
+              }
+              if ((p.operation === 'REST.PUT.OBJECT' || p.operation === 'REST.COPY.OBJECT' || p.operation === 'REST.UPLOAD.PART') && p.objectSize > 0) {
+                traffic[bkt].inBytes += p.objectSize;
+              }
             }
-            if ((p.operation === 'REST.PUT.OBJECT' || p.operation === 'REST.COPY.OBJECT' || p.operation === 'REST.UPLOAD.PART') && p.objectSize > 0) {
-              traffic[bkt].inBytes += p.objectSize;
-            }
-          }
-        })
-      );
+          })
+        );
+      }
     })
   );
 
