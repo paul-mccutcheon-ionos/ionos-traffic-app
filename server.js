@@ -13,6 +13,7 @@ const { S3Client, CreateBucketCommand, HeadBucketCommand,
         GetBucketLifecycleConfigurationCommand,
         GetBucketLoggingCommand,
         PutBucketLoggingCommand } = require('@aws-sdk/client-s3');
+const { NodeHttpHandler } = require('@smithy/node-http-handler');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -1219,7 +1220,10 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
   if (!logBucket || !endpoint || !regionCode || !period || !Array.isArray(buckets))
     return res.status(400).json({ error: 'Missing required fields.' });
 
-  const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode);
+  // Use a large socket pool so concurrent per-bucket reads don't queue up and timeout.
+  // Default pool is 50; with N buckets × 50 reads/batch, requests beyond 50 queue and
+  // may hit the withTimeout ceiling before getting a connection.
+  const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode, 500);
   const traffic = {};
 
   await Promise.allSettled(
@@ -1279,12 +1283,16 @@ const IONOS_S3_REGIONS = {
 };
 const DEFAULT_S3 = { region: 'eu-central-1', endpoint: 'https://s3.eu-central-1.ionoscloud.com', label: 'Frankfurt' };
 
-function makeS3(accessKey, secretKey, endpoint, region) {
-  return new S3Client({
+function makeS3(accessKey, secretKey, endpoint, region, maxSockets = 50) {
+  const cfg = {
     endpoint, region,
     credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
     forcePathStyle: true,
-  });
+  };
+  if (maxSockets !== 50) {
+    cfg.requestHandler = new NodeHttpHandler({ maxSockets });
+  }
+  return new S3Client(cfg);
 }
 
 async function streamToBuffer(stream) {
