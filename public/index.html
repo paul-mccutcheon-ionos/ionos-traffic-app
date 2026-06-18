@@ -1997,8 +1997,10 @@
   document.getElementById('s3-load-traffic-btn').addEventListener('click', async () => {
     if (!lastBucketData) return;
     if (!s3LoggingState) { alert('Logging status not loaded yet — please wait for the Object Storage Logs card to finish loading.'); return; }
-    const enabledBuckets = s3LoggingState.buckets.filter(b => b.enabled && b.ownerType === 'user');
-    if (!enabledBuckets.length) { alert('No user-owned buckets have logging enabled.\nGo to the Object Storage Logs card → Setup tab and click Activate All to enable access logging first.'); return; }
+    // Include all user-owned buckets regardless of current logging state —
+    // historical log files remain in ionos-osl-{region} even after logging is disabled.
+    const enabledBuckets = s3LoggingState.buckets.filter(b => b.ownerType === 'user');
+    if (!enabledBuckets.length) { alert('No user-owned buckets found.'); return; }
 
     // Group by region — each uses its ionos-osl-{region} log bucket
     const byRegion = {};
