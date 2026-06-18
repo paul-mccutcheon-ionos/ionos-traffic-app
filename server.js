@@ -892,6 +892,19 @@ async function resolveBucketRegion(s3AccessKey, s3SecretKey, bucketName, sourceR
     return S3_REGION_MAP[loc] || S3_REGION_MAP['eu-central-1'];
   } catch (_) {}
 
+  // Contract/DCD buckets may not be visible from Frankfurt — probe other endpoints in parallel
+  const otherRegions = S3_BUCKET_REGIONS.filter(r => r.region !== S3_PRIMARY.region);
+  const locResults = await Promise.allSettled(
+    otherRegions.map(async ({ endpoint, region }) => {
+      const s3r = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
+      const r = await withTimeout(s3r.send(new GetBucketLocationCommand({ Bucket: bucketName })), 5000);
+      return r.LocationConstraint || region;
+    })
+  );
+  for (const r of locResults) {
+    if (r.status === 'fulfilled' && S3_REGION_MAP[r.value]) return S3_REGION_MAP[r.value];
+  }
+
   const headResults = await Promise.allSettled(
     S3_BUCKET_REGIONS.map(async ({ endpoint, region }) => {
       const s3r = makeS3(s3AccessKey, s3SecretKey, endpoint, region);
@@ -1220,29 +1233,30 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
   if (!logBucket || !endpoint || !regionCode || !period || !Array.isArray(buckets))
     return res.status(400).json({ error: 'Missing required fields.' });
 
-  // Use a large socket pool so concurrent per-bucket reads don't queue up and timeout.
-  // Default pool is 50; with N buckets × 50 reads/batch, requests beyond 50 queue and
-  // may hit the withTimeout ceiling before getting a connection.
+  // Large socket pool prevents concurrent per-bucket reads from queueing and timing out
   const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode, 500);
   const traffic = {};
 
   await Promise.allSettled(
     buckets.map(async bucketName => {
-      let ct, keys = [];
-      do {
-        const resp = await withTimeout(
-          s3.send(new ListObjectsV2Command({ Bucket: logBucket, Prefix: `${bucketName}/${period}-`, MaxKeys: 1000, ContinuationToken: ct })),
-          8000
-        );
-        for (const o of resp.Contents || []) keys.push(o.Key);
-        ct = resp.NextContinuationToken;
-      } while (ct && keys.length < 5000);
+      // List up to 1000 log files, then read the 500 most-recent.
+      // S3 returns keys ascending (oldest first) so slice(-500) gives the most recent.
+      // This bounds read time for high-volume buckets (e.g. Velero, OpenShift log collectors).
+      let ct, allKeys = [];
+      try {
+        do {
+          const resp = await withTimeout(
+            s3.send(new ListObjectsV2Command({ Bucket: logBucket, Prefix: `${bucketName}/${period}-`, MaxKeys: 1000, ContinuationToken: ct })),
+            8000
+          );
+          for (const o of resp.Contents || []) allKeys.push(o.Key);
+          ct = resp.NextContinuationToken;
+        } while (ct && allKeys.length < 1000);
+      } catch (_) {}
 
+      const keys = allKeys.length > 500 ? allKeys.slice(-500) : allKeys;
       if (!keys.length) return;
 
-      // Process in batches of 50 concurrent reads. Firing all keys simultaneously
-      // (previously up to 500 at once) causes inconsistent timeouts under load,
-      // making successive runs return different totals.
       const BATCH = 50;
       for (let i = 0; i < keys.length; i += BATCH) {
         await Promise.allSettled(
@@ -1254,9 +1268,7 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
               if (!p) continue;
               const bkt = p.bucket;
               if (!traffic[bkt]) traffic[bkt] = { inBytes: 0, outBytes: 0 };
-              if (p.bytesSent > 0) {
-                traffic[bkt].outBytes += p.bytesSent;
-              }
+              if (p.bytesSent > 0) traffic[bkt].outBytes += p.bytesSent;
               if ((p.operation === 'REST.PUT.OBJECT' || p.operation === 'REST.COPY.OBJECT' || p.operation === 'REST.UPLOAD.PART') && p.objectSize > 0) {
                 traffic[bkt].inBytes += p.objectSize;
               }
