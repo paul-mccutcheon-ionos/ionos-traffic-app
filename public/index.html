@@ -815,7 +815,16 @@
     <div class="card" id="s3-buckets-card" style="display:none">
       <div style="display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:0.75rem">
         <h2 style="margin:0"><img src="/icon-object-storage.svg" alt="" style="width:1.3em;height:1.3em;vertical-align:middle;margin-right:0.4em;display:inline-block" />Object Storage Bucket Traffic and Utilization</h2>
-        <button type="button" id="s3-load-traffic-btn" style="display:none;font-size:0.78rem;padding:0.3rem 0.9rem;background:#0ea5e9;border:1px solid #0ea5e9;color:#fff;border-radius:4px;cursor:pointer;font-weight:600">&#128200; Load Traffic from Logs</button>
+        <div id="s3-traffic-controls" style="display:none;align-items:center;gap:0.5rem">
+          <select id="s3-traffic-hours" style="font-size:0.78rem;padding:0.25rem 0.5rem;background:#1e2538;border:1px solid #3a4060;color:#e2e8f0;border-radius:4px;cursor:pointer">
+            <option value="1">Last 1 hour</option>
+            <option value="2">Last 2 hours</option>
+            <option value="6" selected>Last 6 hours</option>
+            <option value="12">Last 12 hours</option>
+            <option value="24">Last 24 hours</option>
+          </select>
+          <button type="button" id="s3-load-traffic-btn" style="font-size:0.78rem;padding:0.3rem 0.9rem;background:#0ea5e9;border:1px solid #0ea5e9;color:#fff;border-radius:4px;cursor:pointer;font-weight:600">&#128200; Load Traffic from Logs</button>
+        </div>
       </div>
       <div id="s3-buckets-content"></div>
     </div>
@@ -1691,6 +1700,7 @@
   let lastBucketData  = null;
   let s3CurrentPeriod = '';
   let s3LoggingState  = null;
+  let s3TrafficHours  = null;
 
   function renderS3Buckets(data, trafficData) {
     const card    = document.getElementById('s3-buckets-card');
@@ -1708,9 +1718,8 @@
                           : t === 'contract' ? '<span style="font-size:0.75rem;color:#7dd3fc;background:rgba(125,211,252,0.1);padding:0.1rem 0.4rem;border-radius:3px;border:1px solid rgba(125,211,252,0.3)">Contract</span>'
                           :                   '<span style="font-size:0.75rem;color:#64748b">—</span>';
 
-    // Always show the Load Traffic button once bucket data is available
-    const ltBtn = document.getElementById('s3-load-traffic-btn');
-    ltBtn.style.display = '';
+    // Always show the Load Traffic controls once bucket data is available
+    document.getElementById('s3-traffic-controls').style.display = 'flex';
 
     content.innerHTML = `
       <div class="table-wrapper">
@@ -1744,7 +1753,7 @@
         </table>
       </div>
       ${anyBucketCapped ? '<p style="font-size:0.78rem;color:#64748b;margin-top:0.4rem">+ First 10,000 objects sampled per bucket — actual size may be larger.</p>' : ''}
-      ${hasTraffic ? '<p style="font-size:0.78rem;color:#64748b;margin-top:0.25rem">Traffic from access logs — inbound = PUT object sizes, outbound = GET bytes sent. Only user-owned buckets with logging enabled.</p>' : ''}
+      ${hasTraffic ? `<p style="font-size:0.78rem;color:#64748b;margin-top:0.25rem">Traffic from access logs${s3TrafficHours ? ` — last ${s3TrafficHours === 1 ? '1 hour' : s3TrafficHours + ' hours'}` : ''} — inbound = PUT object sizes, outbound = GET bytes sent.</p>` : ''}
     `;
   }
 
@@ -1860,9 +1869,6 @@
       </div>
     `;
 
-    // Update Load Traffic button label (visibility is controlled by renderS3Buckets)
-    const ltBtn = document.getElementById('s3-load-traffic-btn');
-    ltBtn.textContent = `\u{1F4C8} Load Traffic for ${s3CurrentPeriod} from Logs`;
 
     // Tab switching
     content.querySelectorAll('.fl-tab').forEach(t => {
@@ -1997,12 +2003,12 @@
   document.getElementById('s3-load-traffic-btn').addEventListener('click', async () => {
     if (!lastBucketData) return;
     if (!s3LoggingState) { alert('Logging status not loaded yet — please wait for the Object Storage Logs card to finish loading.'); return; }
-    // Include all user-owned buckets regardless of current logging state —
-    // historical log files remain in ionos-osl-{region} even after logging is disabled.
     const enabledBuckets = s3LoggingState.buckets.filter(b => b.ownerType === 'user');
     if (!enabledBuckets.length) { alert('No user-owned buckets found.'); return; }
 
-    // Group by region — each uses its ionos-osl-{region} log bucket
+    const hoursBack = parseInt(document.getElementById('s3-traffic-hours').value, 10) || 6;
+    const hourLabel = hoursBack === 1 ? '1 hour' : `${hoursBack} hours`;
+
     const byRegion = {};
     for (const b of enabledBuckets) {
       if (!byRegion[b.regionCode]) byRegion[b.regionCode] = { endpoint: b.endpoint, buckets: [] };
@@ -2010,7 +2016,7 @@
     }
 
     const btn = document.getElementById('s3-load-traffic-btn');
-    btn.disabled = true; btn.textContent = '⏳ Reading logs…';
+    btn.disabled = true; btn.textContent = `⏳ Reading logs (last ${hourLabel})…`;
     try {
       const trafficMerged = {};
       await Promise.all(
@@ -2020,7 +2026,7 @@
             body: JSON.stringify({
               s3AccessKey: flS3Creds.s3AccessKey || '', s3SecretKey: flS3Creds.s3SecretKey || '',
               logBucket: `ionos-osl-${regionCode}`, endpoint, regionCode,
-              buckets: bktNames, period: s3CurrentPeriod,
+              buckets: bktNames, hoursBack,
             })
           });
           if (!r.ok) return;
@@ -2028,12 +2034,13 @@
           for (const [k, v] of Object.entries(d.traffic || {})) trafficMerged[k] = v;
         })
       );
+      s3TrafficHours = hoursBack;
       renderS3Buckets(lastBucketData, trafficMerged);
     } catch (err) {
       alert('Error loading traffic: ' + err.message);
     } finally {
       btn.disabled = false;
-      btn.textContent = `\u{1F4C8} Load Traffic for ${s3CurrentPeriod} from Logs`;
+      btn.textContent = '&#128200; Load Traffic from Logs';
     }
   });
 
@@ -2138,7 +2145,7 @@
         document.getElementById('s3-buckets-card').style.display = '';
         document.getElementById('s3-buckets-content').innerHTML =
           '<p style="color:#64748b;font-size:0.88rem;padding:0.5rem 0">&#9203; Loading bucket data&hellip;</p>';
-        document.getElementById('s3-load-traffic-btn').style.display = 'none';
+        document.getElementById('s3-traffic-controls').style.display = 'none';
         document.getElementById('s3-logging-card').style.display = '';
         document.getElementById('s3-logging-content').innerHTML =
           '<p style="color:#64748b;font-size:0.88rem;padding:0.5rem 0">&#9203; Loading logging status&hellip;</p>';

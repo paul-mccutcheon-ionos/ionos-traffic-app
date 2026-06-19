@@ -1228,33 +1228,51 @@ app.post('/api/s3-logging-set', async (req, res) => {
 app.post('/api/s3-bucket-traffic', async (req, res) => {
   const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
   const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
-  const { logBucket, endpoint, regionCode, buckets, period } = req.body;
+  const { logBucket, endpoint, regionCode, buckets, hoursBack } = req.body;
   if (!s3AccessKey || !s3SecretKey) return res.status(400).json({ error: 'S3 credentials not available.' });
-  if (!logBucket || !endpoint || !regionCode || !period || !Array.isArray(buckets))
+  if (!logBucket || !endpoint || !regionCode || !hoursBack || !Array.isArray(buckets))
     return res.status(400).json({ error: 'Missing required fields.' });
 
-  // Large socket pool prevents concurrent per-bucket reads from queueing and timing out
+  const hours = Math.min(Math.max(parseInt(hoursBack, 10) || 1, 1), 24);
+  const now = Date.now();
+  const cutoff = now - hours * 3600 * 1000;
+
+  const utcDateStr = ts => {
+    const d = new Date(ts);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  };
+
+  // Parse timestamp from log file key: "bucketName/YYYY-MM-DD-HH-MM-SS-..."
+  const keyTimestamp = key => {
+    const m = key.match(/\/(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-/);
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : 0;
+  };
+
+  // Collect unique date prefixes spanning the window (1 date normally, 2 when crossing midnight)
+  const datePrefixes = [...new Set([utcDateStr(cutoff), utcDateStr(now)])];
+
   const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode, 500);
   const traffic = {};
 
   await Promise.allSettled(
     buckets.map(async bucketName => {
-      // List up to 1000 log files, then read the 500 most-recent.
-      // S3 returns keys ascending (oldest first) so slice(-500) gives the most recent.
-      // This bounds read time for high-volume buckets (e.g. Velero, OpenShift log collectors).
-      let ct, allKeys = [];
-      try {
-        do {
-          const resp = await withTimeout(
-            s3.send(new ListObjectsV2Command({ Bucket: logBucket, Prefix: `${bucketName}/${period}-`, MaxKeys: 1000, ContinuationToken: ct })),
-            8000
-          );
-          for (const o of resp.Contents || []) allKeys.push(o.Key);
-          ct = resp.NextContinuationToken;
-        } while (ct && allKeys.length < 1000);
-      } catch (_) {}
+      // List log files for each date in the window, then filter by filename timestamp
+      const allKeys = [];
+      for (const datePrefix of datePrefixes) {
+        try {
+          let ct;
+          do {
+            const resp = await withTimeout(
+              s3.send(new ListObjectsV2Command({ Bucket: logBucket, Prefix: `${bucketName}/${datePrefix}-`, MaxKeys: 1000, ContinuationToken: ct })),
+              8000
+            );
+            for (const o of resp.Contents || []) allKeys.push(o.Key);
+            ct = resp.NextContinuationToken;
+          } while (ct);
+        } catch (_) {}
+      }
 
-      const keys = allKeys.length > 500 ? allKeys.slice(-500) : allKeys;
+      const keys = allKeys.filter(key => keyTimestamp(key) >= cutoff);
       if (!keys.length) return;
 
       const BATCH = 50;
@@ -1279,7 +1297,7 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
     })
   );
 
-  res.json({ traffic, period });
+  res.json({ traffic, hoursBack: hours });
 });
 
 // ── Flow Logs ────────────────────────────────────────────────────────────────
