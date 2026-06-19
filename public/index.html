@@ -1837,6 +1837,22 @@
             <span class="browse-spinner" id="osl-deactivate-spinner"></span>
           </button>
         </div>
+        <div style="display:flex;gap:0.75rem;margin-top:1rem;align-items:center;flex-wrap:wrap;border-top:1px solid #1e2538;padding-top:0.75rem">
+          <span style="font-size:0.82rem;color:#94a3b8;white-space:nowrap">Log retention:</span>
+          <select id="osl-retention-hours" style="font-size:0.82rem;padding:0.25rem 0.5rem;background:#1e2538;border:1px solid #3a4060;color:#e2e8f0;border-radius:4px;cursor:pointer">
+            <option value="1">1 hour</option>
+            <option value="2">2 hours</option>
+            <option value="6" selected>6 hours</option>
+            <option value="12">12 hours</option>
+            <option value="24">24 hours</option>
+          </select>
+          <button type="button" id="osl-retention-btn"
+            style="padding:0.3rem 0.9rem;border-radius:5px;border:1px solid #3a4060;background:transparent;color:#94a3b8;font-size:0.82rem;cursor:pointer">
+            Apply to log buckets
+          </button>
+          <span id="osl-retention-status" style="font-size:0.78rem;color:#64748b"></span>
+        </div>
+        <p style="font-size:0.75rem;color:#475569;margin-top:0.35rem;margin-bottom:0">S3 lifecycle policies expire in whole days — all options above apply a 1-day retention on the log bucket.</p>
         <div id="osl-setup-results" style="margin-top:1rem"></div>
       </div>
 
@@ -1995,6 +2011,40 @@
         renderS3Logging(s3LoggingState, 'osl-setup');
       } catch (_) {}
       finally { btn.disabled = false; lbl.textContent = 'Deactivate All'; spn.style.display = ''; }
+    });
+
+    // ── Log Retention ────────────────────────────────────────────────────────────
+    document.getElementById('osl-retention-btn')?.addEventListener('click', async () => {
+      const hours = parseInt(document.getElementById('osl-retention-hours').value, 10) || 6;
+      const btn = document.getElementById('osl-retention-btn');
+      const statusEl = document.getElementById('osl-retention-status');
+      btn.disabled = true; btn.textContent = 'Applying…'; statusEl.textContent = '';
+      const regions = [...new Map(
+        userBuckets.map(b => [b.regionCode, { regionCode: b.regionCode, endpoint: b.endpoint }])
+      ).values()];
+      try {
+        const r = await fetch('/api/s3-osl-set-retention', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            s3AccessKey: flS3Creds.s3AccessKey || '', s3SecretKey: flS3Creds.s3SecretKey || '',
+            regions, hoursBack: hours,
+          })
+        });
+        const d = await r.json();
+        if (!r.ok) { statusEl.textContent = d.error; statusEl.style.color = '#f87171'; return; }
+        const failed = (d.results || []).filter(x => !x.ok);
+        if (!failed.length) {
+          statusEl.textContent = `✓ 1-day expiry set on ${d.results.length} log bucket(s)`;
+          statusEl.style.color = '#4ade80';
+        } else {
+          statusEl.textContent = `${failed.length} error(s): ${failed.map(x => x.error).join('; ')}`;
+          statusEl.style.color = '#f87171';
+        }
+      } catch (e) {
+        statusEl.textContent = e.message; statusEl.style.color = '#f87171';
+      } finally {
+        btn.disabled = false; btn.textContent = 'Apply to log buckets';
+      }
     });
   }
 

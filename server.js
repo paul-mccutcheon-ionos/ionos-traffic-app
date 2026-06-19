@@ -1225,6 +1225,37 @@ app.post('/api/s3-logging-set', async (req, res) => {
   }
 });
 
+app.post('/api/s3-osl-set-retention', async (req, res) => {
+  const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
+  const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
+  const { regions } = req.body;
+  if (!s3AccessKey || !s3SecretKey) return res.status(400).json({ error: 'S3 credentials not available.' });
+  if (!Array.isArray(regions) || !regions.length) return res.status(400).json({ error: 'regions required.' });
+
+  // S3 lifecycle expiry is whole days only; all hourly options map to 1 day (minimum)
+  const settled = await Promise.allSettled(
+    regions.map(async ({ regionCode, endpoint }) => {
+      const logBucket = `ionos-osl-${regionCode}`;
+      const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode);
+      await withTimeout(s3.send(new PutBucketLifecycleConfigurationCommand({
+        Bucket: logBucket,
+        LifecycleConfiguration: {
+          Rules: [{ ID: 'osl-log-expiry', Status: 'Enabled', Filter: { Prefix: '' }, Expiration: { Days: 1 } }]
+        }
+      })), 8000);
+      return logBucket;
+    })
+  );
+
+  res.json({
+    results: settled.map((r, i) => ({
+      logBucket: `ionos-osl-${regions[i].regionCode}`,
+      ok: r.status === 'fulfilled',
+      error: r.reason?.message,
+    }))
+  });
+});
+
 app.post('/api/s3-bucket-traffic', async (req, res) => {
   const s3AccessKey = req.body.s3AccessKey || process.env.IONOS_S3_ACCESS_KEY;
   const s3SecretKey = req.body.s3SecretKey || process.env.IONOS_S3_SECRET_KEY;
