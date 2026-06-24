@@ -1886,7 +1886,7 @@
         </div>
         <div style="display:flex;gap:0.75rem;margin-top:1rem;align-items:center;flex-wrap:wrap;border-top:1px solid #1e2538;padding-top:0.75rem">
           <span style="font-size:0.82rem;color:#94a3b8;white-space:nowrap">Log retention:</span>
-          <select id="osl-retention-hours" style="font-size:0.82rem;padding:0.25rem 0.5rem;background:#1e2538;border:1px solid #3a4060;color:#e2e8f0;border-radius:4px;cursor:pointer">
+          <select id="osl-retention-hours" style="font-size:0.82rem;padding:0.25rem 0.5rem;background:#1e2538;border:1px solid #3a4060;color:#e2e8f0;border-radius:4px;cursor:pointer;width:auto;flex-shrink:0">
             <option value="1">1 hour</option>
             <option value="2">2 hours</option>
             <option value="6" selected>6 hours</option>
@@ -1899,7 +1899,7 @@
           </button>
           <span id="osl-retention-status" style="font-size:0.78rem;color:#64748b"></span>
         </div>
-        ${currentRetentionHtml}
+        <div id="osl-current-retention"></div>
         <p style="font-size:0.75rem;color:#475569;margin-top:0.35rem;margin-bottom:0">S3 lifecycle policies expire in whole days — all options above apply a 1-day retention on the log bucket.</p>
         <div id="osl-setup-results" style="margin-top:1rem"></div>
       </div>
@@ -1933,6 +1933,9 @@
       </div>
     `;
 
+    // Populate current retention separately to avoid template-literal evaluation issues
+    const retEl = document.getElementById('osl-current-retention');
+    if (retEl) retEl.innerHTML = currentRetentionHtml;
 
     // Tab switching
     content.querySelectorAll('.fl-tab').forEach(t => {
