@@ -29,27 +29,53 @@
       background: #0f1117;
       color: #e2e8f0;
       min-height: 100vh;
-      padding: 2rem 1rem;
+      margin: 0;
     }
 
-    .container { max-width: 960px; margin: 0 auto; }
-
-    header {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 1.75rem; gap: 1rem;
+    /* ── App shell: banner + sidebar + main ── */
+    #app-banner {
+      position: fixed; top: 0; left: 0; right: 0; height: 60px;
+      background: #0a0c14; border-bottom: 1px solid #1e2538;
+      display: flex; align-items: center; gap: 1rem;
+      padding: 0 1.5rem; z-index: 200;
     }
-    .header-logo img { display: block; height: 56px; width: auto; }
-    .header-title { text-align: center; flex: 1; }
-    .header-title h1 { font-family: 'Overpass', 'Segoe UI', system-ui, sans-serif; font-size: 1.75rem; font-weight: 600; color: #ffffff; letter-spacing: 0.01em; }
-    .header-title h1 .version-badge {
-      display: inline-block; vertical-align: middle;
-      margin-left: 0.6rem; padding: 0.15rem 0.55rem;
+    .banner-logo img { display: block; height: 34px; width: auto; }
+    .banner-title { font-size: 1rem; font-weight: 600; color: #e2e8f0; white-space: nowrap; }
+    .version-badge {
+      display: inline-flex; align-items: center;
+      padding: 0.15rem 0.55rem;
       font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em;
       color: #94a3b8; background: #0f1117;
       border: 1px solid #2d3348; border-radius: 999px;
     }
-    .header-title p  { color: #94a3b8; margin-top: 0.4rem; font-size: 0.95rem; }
-    .header-spacer { width: 64px; }
+
+    #app-sidebar {
+      position: fixed; top: 60px; left: 0; bottom: 0; width: 220px;
+      background: #0a0c14; border-right: 1px solid #1e2538;
+      overflow-y: auto; z-index: 100; padding: 1.25rem 0;
+    }
+    .nav-label {
+      font-size: 0.68rem; font-weight: 700; letter-spacing: 0.1em;
+      color: #475569; text-transform: uppercase; padding: 0 1.1rem 0.6rem;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 0.75rem;
+      width: 100%; padding: 0.65rem 1.1rem;
+      background: none; border: none; border-left: 3px solid transparent;
+      color: #94a3b8; font-family: 'Overpass', 'Segoe UI', system-ui, sans-serif;
+      font-size: 0.88rem; font-weight: 500; cursor: pointer; text-align: left;
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+    }
+    .nav-item:hover { background: #111827; color: #e2e8f0; }
+    .nav-item.nav-active {
+      border-left-color: #38bdf8; background: #0c1a2a; color: #7dd3fc; font-weight: 600;
+    }
+    .nav-icon { width: 1.15em; height: 1.15em; flex-shrink: 0; }
+
+    #app-main {
+      margin-left: 220px; margin-top: 60px;
+      padding: 1.75rem 2rem; max-width: 1100px;
+    }
 
     .card {
       background: #1e2130;
@@ -383,7 +409,16 @@
     .fl-legend { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; color: #64748b; margin-top: 0.5rem; }
     .fl-legend-bar { width: 120px; height: 10px; border-radius: 3px; background: linear-gradient(to right, #1e3a5f, #0ea5e9, #f97316, #ef4444); }
 
+    @media (max-width: 900px) {
+      #app-main { padding: 1.25rem 1.25rem; }
+    }
     @media (max-width: 640px) {
+      #app-sidebar { width: 52px; padding: 0.75rem 0; }
+      #app-main { margin-left: 52px; padding: 1rem 0.75rem; }
+      .nav-label { display: none; }
+      .nav-item { padding: 0.75rem; justify-content: center; gap: 0; }
+      .nav-item span { display: none; }
+      .nav-icon { width: 1.4em; height: 1.4em; }
       .form-grid { grid-template-columns: 1fr; }
       .form-group.full-width { grid-column: auto; }
       .chart-container { height: 220px; }
@@ -395,48 +430,31 @@
   </style>
 </head>
 <body>
-<div class="container">
 
-  <header>
-    <div class="header-logo">
-      <img src="/ionos-cloud-logo.png" alt="IONOS Cloud" />
-    </div>
-    <div class="header-title">
-      <h1>Traffic Billing Tool<span id="app-version" class="version-badge"></span></h1>
-      <p>Query IP traffic, VDC aggregate traffic, and S3 Object Storage billing</p>
-    </div>
-    <div class="header-spacer"></div>
-  </header>
+<header id="app-banner">
+  <div class="banner-logo"><img src="/ionos-cloud-logo.png" alt="IONOS Cloud" /></div>
+  <span class="banner-title">Traffic Billing Tool</span>
+  <span id="app-version" class="version-badge"></span>
+</header>
 
-  <!-- ── Mode selector ── -->
-  <div class="card" style="padding:1.25rem 1.5rem">
-    <div class="mode-group">
-      <label>
-        <input class="mode-radio" type="radio" name="mode" value="ip" checked />
-        <div class="mode-option">
-          <span class="mode-icon"><img src="/icon-ip.svg" alt="" style="width:1.4em;height:1.4em;vertical-align:middle;display:inline-block" /></span>
-          <span class="mode-title">Public IP Address Traffic</span>
-          <span class="mode-desc">Single public IP lookup with DNS and device info</span>
-        </div>
-      </label>
-      <label>
-        <input class="mode-radio" type="radio" name="mode" value="vdc" />
-        <div class="mode-option">
-          <span class="mode-icon"><img src="/icon-vdc.svg" alt="" style="width:1.4em;height:1.4em;vertical-align:middle;display:inline-block" /></span>
-          <span class="mode-title">VDC Traffic</span>
-          <span class="mode-desc">Aggregate across all IPs in a VDC with meter breakdown</span>
-        </div>
-      </label>
-      <label>
-        <input class="mode-radio" type="radio" name="mode" value="s3" />
-        <div class="mode-option">
-          <span class="mode-icon"><img src="/icon-object-storage.svg" alt="" style="width:1.4em;height:1.4em;vertical-align:middle;display:inline-block" /></span>
-          <span class="mode-title">Object Storage Traffic</span>
-          <span class="mode-desc">Object Storage traffic billing by meter ID</span>
-        </div>
-      </label>
-    </div>
-  </div>
+<nav id="app-sidebar">
+  <div class="nav-label">Mode</div>
+  <button class="nav-item nav-active" data-mode="ip">
+    <img src="/icon-ip.svg" class="nav-icon" alt="" /><span>IP Address Traffic</span>
+  </button>
+  <button class="nav-item" data-mode="vdc">
+    <img src="/icon-vdc.svg" class="nav-icon" alt="" /><span>VDC Traffic</span>
+  </button>
+  <button class="nav-item" data-mode="s3">
+    <img src="/icon-object-storage.svg" class="nav-icon" alt="" /><span>Object Storage</span>
+  </button>
+</nav>
+
+<input class="mode-radio" type="radio" name="mode" value="ip" checked style="display:none" />
+<input class="mode-radio" type="radio" name="mode" value="vdc" style="display:none" />
+<input class="mode-radio" type="radio" name="mode" value="s3" style="display:none" />
+
+<main id="app-main">
 
   <!-- ── Query form ── -->
   <div class="card">
@@ -885,7 +903,7 @@
     </div>
   </div>
 
-</div><!-- /container -->
+</main>
 
 <!-- Credential password modal -->
 <div id="env-auth-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);
@@ -3025,6 +3043,25 @@
     }
     flGraphAnim = requestAnimationFrame(step);
   }
+
+  // ── Sidebar navigation ─────────────────────────────────────────────────────
+  (function () {
+    const navBtns = document.querySelectorAll('.nav-item[data-mode]');
+    navBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.mode;
+        navBtns.forEach(b => b.classList.remove('nav-active'));
+        btn.classList.add('nav-active');
+        const radio = document.querySelector(`.mode-radio[value="${mode}"]`);
+        if (radio) { radio.checked = true; radio.dispatchEvent(new Event('change', { bubbles: true })); }
+      });
+    });
+    document.querySelectorAll('.mode-radio').forEach(r => {
+      r.addEventListener('change', () => {
+        if (r.checked) navBtns.forEach(b => b.classList.toggle('nav-active', b.dataset.mode === r.value));
+      });
+    });
+  })();
 </script>
 </body>
 </html>
