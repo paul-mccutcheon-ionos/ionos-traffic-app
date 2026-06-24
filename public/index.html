@@ -1813,6 +1813,20 @@
       .map(r => { const b = userBuckets.find(x => x.regionCode === r); return `ionos-osl-${r} (${b.region})`; })
       .join(', ');
 
+    // Pre-compute current retention display (avoids IIFE issues inside template literals)
+    const retentionMap = data.retention || {};
+    const uniqueOslBuckets = [...new Set(userBuckets.map(b => `ionos-osl-${b.regionCode}`))];
+    const retentionParts = uniqueOslBuckets.map(lb => {
+      const days = retentionMap[lb];
+      const valHtml = (days == null)
+        ? '<span style="color:#94a3b8">not set</span>'
+        : `<span style="color:#6ee7b7;font-weight:600">${days} day${days === 1 ? '' : 's'}</span>`;
+      return `<span style="color:#cbd5e1">${escHtml(lb)}</span>: ${valHtml}`;
+    });
+    const currentRetentionHtml = retentionParts.length
+      ? `<div style="margin-top:0.5rem;font-size:0.8rem;color:#94a3b8">Current log retention: ${retentionParts.join('<span style="color:#334155"> &nbsp;|&nbsp; </span>')}</div>`
+      : '';
+
     content.innerHTML = `
       <div class="fl-tabs">
         <button class="fl-tab${tab === 'osl-setup'  ? ' fl-active' : ''}" data-tab="osl-setup">Setup</button>
@@ -1884,19 +1898,8 @@
             Apply to log buckets
           </button>
           <span id="osl-retention-status" style="font-size:0.78rem;color:#64748b"></span>
-          ${(()=>{
-            const retentionMap = data.retention || {};
-            const uniqueBuckets = [...new Set(userBuckets.map(b => `ionos-osl-${b.regionCode}`))];
-            const parts = uniqueBuckets.map(lb => {
-              const days = retentionMap[lb];
-              const label = days == null ? '<span style="color:#475569">no rule</span>' : `<span style="color:#6ee7b7">${days} day${days === 1 ? '' : 's'}</span>`;
-              return `${escHtml(lb)}: ${label}`;
-            });
-            return parts.length
-              ? `<span style="font-size:0.78rem;color:#64748b;margin-left:0.5rem">Current: ${parts.join(' &nbsp;|&nbsp; ')}</span>`
-              : '';
-          })()}
         </div>
+        ${currentRetentionHtml}
         <p style="font-size:0.75rem;color:#475569;margin-top:0.35rem;margin-bottom:0">S3 lifecycle policies expire in whole days — all options above apply a 1-day retention on the log bucket.</p>
         <div id="osl-setup-results" style="margin-top:1rem"></div>
       </div>

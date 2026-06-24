@@ -1,6 +1,6 @@
 {
   "name": "ionos-traffic-app",
-  "version": "1.4.20",
+  "version": "1.4.21",
   "description": "IONOS Billing API Traffic Tool - Web UI",
   "main": "server.js",
   "scripts": {
