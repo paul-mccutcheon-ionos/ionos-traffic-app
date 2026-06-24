@@ -40,7 +40,7 @@
       padding: 0 1.5rem; z-index: 200;
     }
     .banner-logo img { display: block; height: 32px; width: auto; max-width: 220px; }
-    .banner-title { font-size: 1rem; font-weight: 600; color: #e2e8f0; white-space: nowrap; }
+    .banner-title { font-size: 1.35rem; font-weight: 700; color: #e2e8f0; white-space: nowrap; flex: 1; text-align: center; }
     .banner-actions {
       margin-left: auto; display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;
     }
@@ -445,8 +445,10 @@
 
 <header id="app-banner">
   <div class="banner-logo"><img src="/ionos-cloud-logo.png" alt="IONOS Cloud" /></div>
-  <span class="banner-title">Traffic Billing Tool</span>
-  <span id="app-version" class="version-badge"></span>
+  <div style="flex:1;display:flex;align-items:center;justify-content:center;gap:0.5rem">
+    <span class="banner-title" style="flex:unset">Traffic Billing Tool</span>
+    <span id="app-version" class="version-badge"></span>
+  </div>
   <div class="banner-actions">
     <label for="env-file-upload" class="banner-btn">&#128194; Load .env file</label>
     <input type="file" id="env-file-upload" accept=".env,text/plain" style="display:none" />
