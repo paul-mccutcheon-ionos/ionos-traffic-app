@@ -1273,14 +1273,13 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
   };
 
-  // Parse timestamp from log file key: "bucketName/YYYY-MM-DD-HH-MM-SS-..."
-  const keyTimestamp = key => {
-    const m = key.match(/\/(\d{4})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-(\d{2})-/);
-    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : 0;
-  };
-
-  // Collect unique date prefixes spanning the window (1 date normally, 2 when crossing midnight)
-  const datePrefixes = [...new Set([utcDateStr(cutoff), utcDateStr(now)])];
+  // Date prefixes: cover the window plus a 2-hour delivery-lag buffer so recently-written
+  // log files aren't missed when their delivery crosses midnight or hour boundaries.
+  const datePrefixes = [...new Set([
+    utcDateStr(cutoff - 2 * 3600 * 1000),
+    utcDateStr(cutoff),
+    utcDateStr(now),
+  ])];
 
   const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode, 500);
   const traffic = {};
@@ -1288,23 +1287,28 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
 
   await Promise.allSettled(
     buckets.map(async bucketName => {
-      // List log files for each date in the window, then filter by filename timestamp
+      // List log files by date prefix; use LastModified (reliable, set by IONOS on delivery)
+      // rather than parsing filenames (naming conventions may differ from AWS standard).
       const allKeys = [];
       for (const datePrefix of datePrefixes) {
         try {
           let ct;
           do {
             const resp = await withTimeout(
-              s3.send(new ListObjectsV2Command({ Bucket: logBucket, Prefix: `${bucketName}/${datePrefix}-`, MaxKeys: 1000, ContinuationToken: ct })),
+              s3.send(new ListObjectsV2Command({ Bucket: logBucket, Prefix: `${bucketName}/${datePrefix}`, MaxKeys: 1000, ContinuationToken: ct })),
               8000
             );
-            for (const o of resp.Contents || []) allKeys.push(o.Key);
+            for (const o of resp.Contents || []) {
+              if (o.LastModified && new Date(o.LastModified).getTime() >= cutoff)
+                allKeys.push(o.Key);
+            }
             ct = resp.NextContinuationToken;
           } while (ct);
         } catch (_) {}
       }
 
-      const keys = allKeys.filter(key => keyTimestamp(key) >= cutoff);
+      // Deduplicate (the same file can appear under multiple date prefixes)
+      const keys = [...new Set(allKeys)];
       if (!keys.length) return;
       loggedBuckets.add(bucketName);
 

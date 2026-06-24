@@ -1752,13 +1752,14 @@
           </tr></thead>
           <tbody>${data.buckets.map(b => {
             const loggingInfo = s3LoggingState?.buckets?.find(lb => lb.name === b.name);
-            const loggingOn   = loggingInfo?.enabled;
+            // loggingInfo may be undefined if logging status hasn't loaded yet; treat as unknown (not "off")
+            const loggingOff  = loggingInfo && loggingInfo.enabled === false;
             const td = hasTraffic ? trafficData[b.name] : null;
             let inCell, outCell;
             if (!hasTraffic) {
               inCell = outCell = '<span style="color:#475569">—</span>';
-            } else if (b.ownerType === 'contract' || !loggingOn) {
-              inCell = outCell = '<span style="color:#334155;font-size:0.8rem" title="Enable logging in the Object Storage Logs tab">logging off</span>';
+            } else if (loggingOff) {
+              inCell = outCell = '<span style="color:#334155;font-size:0.8rem" title="Enable logging in the Object Storage Logs → Setup tab">logging off</span>';
             } else if (td) {
               inCell  = `<span style="color:#34d399">${fmtBytes(td.inBytes)}</span>`;
               outCell = `<span style="color:#f87171">${fmtBytes(td.outBytes)}</span>`;
