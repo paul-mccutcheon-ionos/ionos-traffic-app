@@ -41,6 +41,18 @@
     }
     .banner-logo img { display: block; height: 32px; width: auto; max-width: 220px; }
     .banner-title { font-size: 1rem; font-weight: 600; color: #e2e8f0; white-space: nowrap; }
+    .banner-actions {
+      margin-left: auto; display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;
+    }
+    .banner-btn {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      background: #1e293b; border: 1px solid #334155; color: #94a3b8;
+      border-radius: 6px; padding: 0.3rem 0.75rem; font-size: 0.78rem;
+      cursor: pointer; white-space: nowrap; user-select: none;
+      text-decoration: none; font-family: inherit;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .banner-btn:hover { border-color: #38bdf8; color: #e2e8f0; }
     .version-badge {
       display: inline-flex; align-items: center;
       padding: 0.15rem 0.55rem;
@@ -435,6 +447,12 @@
   <div class="banner-logo"><img src="/ionos-cloud-logo.png" alt="IONOS Cloud" /></div>
   <span class="banner-title">Traffic Billing Tool</span>
   <span id="app-version" class="version-badge"></span>
+  <div class="banner-actions">
+    <label for="env-file-upload" class="banner-btn">&#128194; Load .env file</label>
+    <input type="file" id="env-file-upload" accept=".env,text/plain" style="display:none" />
+    <a id="env-example-download" href="/.env.example" download=".env.example" class="banner-btn">&#11015; .env.example</a>
+    <div id="env-loaded-banner" style="display:none;font-size:0.75rem;color:#6ee7b7;white-space:nowrap">&#10003; .env loaded</div>
+  </div>
 </header>
 
 <nav id="app-sidebar">
@@ -466,24 +484,6 @@
         <div class="form-group full-width">
           <label for="token">Bearer Token</label>
           <input type="password" id="token" placeholder="Paste your IONOS Bearer Token" autocomplete="off" required />
-          <div style="display:flex;align-items:center;gap:0.75rem;margin-top:0.5rem;flex-wrap:wrap">
-            <label for="env-file-upload"
-              style="display:inline-flex;align-items:center;gap:0.4rem;background:#1e293b;border:1px solid #334155;
-                     color:#94a3b8;border-radius:6px;padding:0.3rem 0.75rem;font-size:0.78rem;cursor:pointer;
-                     white-space:nowrap;user-select:none">
-              &#128194; Load .env file
-            </label>
-            <input type="file" id="env-file-upload" accept=".env,text/plain" style="display:none" />
-            <a id="env-example-download" href="/.env.example" download=".env.example"
-               style="display:inline-flex;align-items:center;gap:0.4rem;background:#1e293b;border:1px solid #334155;
-                      color:#94a3b8;border-radius:6px;padding:0.3rem 0.75rem;font-size:0.78rem;text-decoration:none;
-                      white-space:nowrap;user-select:none">
-              &#11015; Download .env.example
-            </a>
-            <div id="env-loaded-banner" style="display:none;font-size:0.78rem;color:#6ee7b7">
-              &#10003; Credentials pre-loaded from <code style="background:#0f172a;padding:1px 4px;border-radius:3px">.env</code>
-            </div>
-          </div>
         </div>
 
         <!-- Shared: contract ID -->
