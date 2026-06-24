@@ -1732,6 +1732,7 @@
     const totalObjects  = data.buckets.reduce((s, b) => s + b.objectCount, 0);
     const totalIn  = hasTraffic ? data.buckets.reduce((s, b) => s + (trafficData[b.name]?.inBytes  || 0), 0) : null;
     const totalOut = hasTraffic ? data.buckets.reduce((s, b) => s + (trafficData[b.name]?.outBytes || 0), 0) : null;
+    const loggingEnabledNames = new Set((s3LoggingState?.buckets || []).filter(b => b.enabled).map(b => b.name));
     const ownerBadge = t => t === 'user'     ? '<span style="font-size:0.75rem;color:#6ee7b7;background:rgba(110,231,183,0.1);padding:0.1rem 0.4rem;border-radius:3px;border:1px solid rgba(110,231,183,0.3)">User</span>'
                           : t === 'contract' ? '<span style="font-size:0.75rem;color:#7dd3fc;background:rgba(125,211,252,0.1);padding:0.1rem 0.4rem;border-radius:3px;border:1px solid rgba(125,211,252,0.3)">Contract</span>'
                           :                   '<span style="font-size:0.75rem;color:#64748b">—</span>';
@@ -1750,15 +1751,28 @@
             <th style="text-align:right">Traffic Out</th>
           </tr></thead>
           <tbody>${data.buckets.map(b => {
+            const loggingInfo = s3LoggingState?.buckets?.find(lb => lb.name === b.name);
+            const loggingOn   = loggingInfo?.enabled;
             const td = hasTraffic ? trafficData[b.name] : null;
+            let inCell, outCell;
+            if (!hasTraffic) {
+              inCell = outCell = '<span style="color:#475569">—</span>';
+            } else if (b.ownerType === 'contract' || !loggingOn) {
+              inCell = outCell = '<span style="color:#334155;font-size:0.8rem" title="Enable logging in the Object Storage Logs tab">logging off</span>';
+            } else if (td) {
+              inCell  = `<span style="color:#34d399">${fmtBytes(td.inBytes)}</span>`;
+              outCell = `<span style="color:#f87171">${fmtBytes(td.outBytes)}</span>`;
+            } else {
+              inCell = outCell = '<span style="color:#475569">0 B</span>';
+            }
             return `<tr>
               <td style="font-family:monospace;font-size:0.85rem">${escHtml(b.name)}</td>
               <td>${escHtml(b.region)}</td>
               <td>${ownerBadge(b.ownerType)}</td>
               <td style="text-align:right">${b.objectCount.toLocaleString()}${b.capped ? '+' : ''}</td>
               <td style="text-align:right">${fmtBytes(b.totalBytes)}${b.capped ? '+' : ''}</td>
-              <td style="text-align:right;color:#34d399">${td ? fmtBytes(td.inBytes)  : '—'}</td>
-              <td style="text-align:right;color:#f87171">${td ? fmtBytes(td.outBytes) : '—'}</td>
+              <td style="text-align:right">${inCell}</td>
+              <td style="text-align:right">${outCell}</td>
             </tr>`;
           }).join('')}</tbody>
           <tfoot><tr style="border-top:1px solid #2d3348;font-weight:600">
@@ -2071,14 +2085,14 @@
   document.getElementById('s3-load-traffic-btn').addEventListener('click', async () => {
     if (!lastBucketData) return;
     if (!s3LoggingState) { alert('Logging status not loaded yet — please wait for the Object Storage Logs card to finish loading.'); return; }
-    const enabledBuckets = s3LoggingState.buckets.filter(b => b.ownerType === 'user');
-    if (!enabledBuckets.length) { alert('No user-owned buckets found.'); return; }
+    const loggingEnabledBuckets = s3LoggingState.buckets.filter(b => b.ownerType === 'user' && b.enabled);
+    if (!loggingEnabledBuckets.length) { alert('No user-owned buckets have logging enabled. Use the Object Storage Logs → Setup tab to enable logging.'); return; }
 
     const hoursBack = parseInt(document.getElementById('s3-traffic-hours').value, 10) || 6;
     const hourLabel = hoursBack === 1 ? '1 hour' : `${hoursBack} hours`;
 
     const byRegion = {};
-    for (const b of enabledBuckets) {
+    for (const b of loggingEnabledBuckets) {
       if (!byRegion[b.regionCode]) byRegion[b.regionCode] = { endpoint: b.endpoint, buckets: [] };
       byRegion[b.regionCode].buckets.push(b.name);
     }
@@ -2100,6 +2114,10 @@
           if (!r.ok) return;
           const d = await r.json();
           for (const [k, v] of Object.entries(d.traffic || {})) trafficMerged[k] = v;
+          // Mark logging-enabled buckets that had NO log files as explicitly zero
+          for (const name of (d.loggedBuckets || [])) {
+            if (!trafficMerged[name]) trafficMerged[name] = { inBytes: 0, outBytes: 0 };
+          }
         })
       );
       s3TrafficHours = hoursBack;

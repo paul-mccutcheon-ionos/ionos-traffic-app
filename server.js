@@ -1284,6 +1284,7 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
 
   const s3 = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode, 500);
   const traffic = {};
+  const loggedBuckets = new Set(); // buckets that have any log files in the window
 
   await Promise.allSettled(
     buckets.map(async bucketName => {
@@ -1305,6 +1306,7 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
 
       const keys = allKeys.filter(key => keyTimestamp(key) >= cutoff);
       if (!keys.length) return;
+      loggedBuckets.add(bucketName);
 
       const BATCH = 50;
       for (let i = 0; i < keys.length; i += BATCH) {
@@ -1317,10 +1319,12 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
               if (!p) continue;
               const bkt = p.bucket;
               if (!traffic[bkt]) traffic[bkt] = { inBytes: 0, outBytes: 0 };
-              if (p.bytesSent > 0) traffic[bkt].outBytes += p.bytesSent;
-              if ((p.operation === 'REST.PUT.OBJECT' || p.operation === 'REST.COPY.OBJECT' || p.operation === 'REST.UPLOAD.PART') && p.objectSize > 0) {
+              // Outbound: only actual object GET downloads (not list/head/put-response bytes)
+              if (/^REST\.GET\.(OBJECT|PART|OBJECT\.PART)/.test(p.operation) && p.bytesSent > 0)
+                traffic[bkt].outBytes += p.bytesSent;
+              // Inbound: all PUT/COPY/multipart-upload variants that store object data
+              if (/^REST\.(PUT\.OBJECT|COPY\.OBJECT|UPLOAD\.PART|PUT\.OBJECT\.PART|COPY\.OBJECT\.PART|COPY\.PART)/.test(p.operation) && p.objectSize > 0)
                 traffic[bkt].inBytes += p.objectSize;
-              }
             }
           })
         );
@@ -1328,7 +1332,11 @@ app.post('/api/s3-bucket-traffic', async (req, res) => {
     })
   );
 
-  res.json({ traffic, hoursBack: hours });
+  // Ensure every bucket that had log files appears in traffic (even with zeros)
+  for (const name of loggedBuckets) {
+    if (!traffic[name]) traffic[name] = { inBytes: 0, outBytes: 0 };
+  }
+  res.json({ traffic, hoursBack: hours, loggedBuckets: [...loggedBuckets] });
 });
 
 // ── Flow Logs ────────────────────────────────────────────────────────────────
