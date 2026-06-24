@@ -1884,6 +1884,18 @@
             Apply to log buckets
           </button>
           <span id="osl-retention-status" style="font-size:0.78rem;color:#64748b"></span>
+          ${(()=>{
+            const retentionMap = data.retention || {};
+            const uniqueBuckets = [...new Set(userBuckets.map(b => `ionos-osl-${b.regionCode}`))];
+            const parts = uniqueBuckets.map(lb => {
+              const days = retentionMap[lb];
+              const label = days == null ? '<span style="color:#475569">no rule</span>' : `<span style="color:#6ee7b7">${days} day${days === 1 ? '' : 's'}</span>`;
+              return `${escHtml(lb)}: ${label}`;
+            });
+            return parts.length
+              ? `<span style="font-size:0.78rem;color:#64748b;margin-left:0.5rem">Current: ${parts.join(' &nbsp;|&nbsp; ')}</span>`
+              : '';
+          })()}
         </div>
         <p style="font-size:0.75rem;color:#475569;margin-top:0.35rem;margin-bottom:0">S3 lifecycle policies expire in whole days — all options above apply a 1-day retention on the log bucket.</p>
         <div id="osl-setup-results" style="margin-top:1rem"></div>
@@ -2069,6 +2081,14 @@
         if (!failed.length) {
           statusEl.textContent = `✓ 1-day expiry set on ${d.results.length} log bucket(s)`;
           statusEl.style.color = '#4ade80';
+          // Update cached retention so the "Current:" line re-renders correctly
+          if (s3LoggingState) {
+            if (!s3LoggingState.retention) s3LoggingState.retention = {};
+            for (const res of (d.results || [])) {
+              if (res.ok) s3LoggingState.retention[res.logBucket] = 1;
+            }
+            renderS3Logging(s3LoggingState, 'osl-setup');
+          }
         } else {
           statusEl.textContent = `${failed.length} error(s): ${failed.map(x => x.error).join('; ')}`;
           statusEl.style.color = '#f87171';

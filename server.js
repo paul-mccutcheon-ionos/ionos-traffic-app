@@ -1120,7 +1120,30 @@ app.post('/api/s3-logging-status', async (req, res) => {
     .map(r => r.value)
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  res.json({ buckets });
+  // Fetch current lifecycle retention for each unique OSL log bucket
+  const seenOslBuckets = new Map(); // regionCode -> { endpoint, logBucket }
+  for (const b of buckets) {
+    if (!seenOslBuckets.has(b.regionCode))
+      seenOslBuckets.set(b.regionCode, { endpoint: b.endpoint, logBucket: `ionos-osl-${b.regionCode}` });
+  }
+  const retentionResults = await Promise.allSettled(
+    [...seenOslBuckets.entries()].map(async ([regionCode, { endpoint, logBucket }]) => {
+      const s3r = makeS3(s3AccessKey, s3SecretKey, endpoint, regionCode);
+      try {
+        const lc = await withTimeout(s3r.send(new GetBucketLifecycleConfigurationCommand({ Bucket: logBucket })), 5000);
+        const rule = (lc.Rules || []).find(r => r.Status === 'Enabled' && r.Expiration?.Days);
+        return { regionCode, logBucket, days: rule ? rule.Expiration.Days : null };
+      } catch (_) {
+        return { regionCode, logBucket, days: null };
+      }
+    })
+  );
+  const retention = {};
+  for (const r of retentionResults) {
+    if (r.status === 'fulfilled') retention[r.value.logBucket] = r.value.days;
+  }
+
+  res.json({ buckets, retention });
 });
 
 app.post('/api/s3-osl-setup', async (req, res) => {
